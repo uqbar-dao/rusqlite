@@ -10,16 +10,16 @@
 **
 *************************************************************************
 **
-** This file implements an example of a simple VFS implementation that 
+** This file implements an example of a simple VFS implementation that
 ** omits complex features often not required or not possible on embedded
-** platforms.  Code is included to buffer writes to the journal file, 
+** platforms.  Code is included to buffer writes to the journal file,
 ** which can be a significant performance improvement on some embedded
 ** platforms.
 **
 ** OVERVIEW
 **
-**   The code in this file implements a minimal SQLite VFS that can be 
-**   used on Linux and other posix-like operating systems. The following 
+**   The code in this file implements a minimal SQLite VFS that can be
+**   used on Linux and other posix-like operating systems. The following
 **   system calls are used:
 **
 **    File-system: access(), unlink(), getcwd()
@@ -64,10 +64,10 @@
 **
 **   Most of the data is written in step 1 using a series of calls to the
 **   VFS xWrite() method. The buffers passed to the xWrite() calls are of
-**   various sizes. For example, as of version 3.6.24, when committing a 
-**   transaction that modifies 3 pages of a database file that uses 4096 
-**   byte pages residing on a media with 512 byte sectors, SQLite makes 
-**   eleven calls to the xWrite() method to create the rollback journal, 
+**   various sizes. For example, as of version 3.6.24, when committing a
+**   transaction that modifies 3 pages of a database file that uses 4096
+**   byte pages residing on a media with 512 byte sectors, SQLite makes
+**   eleven calls to the xWrite() method to create the rollback journal,
 **   as follows:
 **
 **             Write offset | Bytes written
@@ -87,18 +87,18 @@
 **             ++++++++++++SYNC+++++++++++
 **
 **   On many operating systems, this is an efficient way to write to a file.
-**   However, on some embedded systems that do not cache writes in OS 
+**   However, on some embedded systems that do not cache writes in OS
 **   buffers it is much more efficient to write data in blocks that are
 **   an integer multiple of the sector-size in size and aligned at the
 **   start of a sector.
 **
 **   To work around this, the code in this file allocates a fixed size
-**   buffer of SQLITE_DEMOVFS_BUFFERSZ using sqlite3_malloc() whenever a 
+**   buffer of SQLITE_DEMOVFS_BUFFERSZ using sqlite3_malloc() whenever a
 **   journal file is opened. It uses the buffer to coalesce sequential
 **   writes into aligned SQLITE_DEMOVFS_BUFFERSZ blocks. When SQLite
 **   invokes the xSync() method to sync the contents of the file to disk,
 **   all accumulated data is written out, even if it does not constitute
-**   a complete block. This means the actual IO to create the rollback 
+**   a complete block. This means the actual IO to create the rollback
 **   journal for the example transaction above is this:
 **
 **             Write offset | Bytes written
@@ -109,7 +109,7 @@
 **                        0             12
 **             ++++++++++++SYNC+++++++++++
 **
-**   Much more efficient if the underlying OS is not caching write 
+**   Much more efficient if the underlying OS is not caching write
 **   operations.
 */
 
@@ -127,6 +127,10 @@
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
 
 /*
 ** Size of the write buffer used by journal files in bytes.
@@ -147,12 +151,91 @@
 typedef struct DemoFile DemoFile;
 struct DemoFile {
   sqlite3_file base;              /* Base class. Must be first. */
-  int fd;                         /* File descriptor */
+  /* int fd; */                        /* File descriptor */
+  char *zIdentifier;
+  char *zName;
 
   char *aBuffer;                  /* Pointer to malloc'd buffer */
   int nBuffer;                    /* Valid bytes of data in zBuffer */
   sqlite3_int64 iBufferOfst;      /* Offset in file of zBuffer[0] */
 };
+
+typedef struct OptionStr OptionStr;
+struct OptionStr {
+    int is_empty;
+    const char *string;
+};
+
+typedef struct Bytes Bytes;
+struct Bytes {
+    void *data;
+    size_t len;
+};
+
+typedef struct Payload Payload;
+struct Payload {
+  int is_empty;       /* 0 -> payload is empty */
+  const OptionStr *mime;
+  Bytes *bytes;
+};
+
+typedef struct ProcessId ProcessId;
+struct ProcessId {
+    int result_number;
+    unsigned long long id;
+    const char *name;
+};
+
+typedef struct IpcMetadata IpcMetadata;
+struct IpcMetadata {
+    OptionStr* ipc;
+    OptionStr* metadata;
+};
+
+extern Payload* get_payload_wrapped();
+extern IpcMetadata* send_and_await_response_wrapped(
+  const char *target_node,
+  const ProcessId *target_process,
+  const OptionStr *request_ipc,
+  const OptionStr *request_metadata,
+  const Payload *payload,
+  const unsigned long long timeout
+);
+
+/* https://chat.openai.com/share/d3261d81-52f2-4fd7-b6c0-8238679e63f2
+** This function looks for the key in the JSON and copies its value into the output buffer.
+*/
+int getJsonValue(const char *json, const char *key, char *output, int outputSize) {
+  char searchKey[256];  // This size should be adjusted based on your needs
+  snprintf(searchKey, sizeof(searchKey), "\"%s\":", key);
+
+  const char *keyStart = strstr(json, searchKey);
+  if (keyStart == NULL) return -1;
+
+  const char *valueStart = keyStart + strlen(searchKey);
+  while (isspace(*valueStart)) valueStart++;  // Skip any whitespace
+
+  const char *valueEnd;
+  if (*valueStart == '\"') {
+      // Value is a string
+      valueStart++;  // Move past the opening quote
+      valueEnd = strchr(valueStart, '\"');
+  } else {
+      // Assume value is a number (integer or float)
+      valueEnd = valueStart;
+      while (isdigit(*valueEnd) || *valueEnd == '.' || *valueEnd == '-' || *valueEnd == '+') valueEnd++;
+  }
+
+  if (valueEnd == NULL) return -1;
+
+  int valueLength = valueEnd - valueStart;
+  if (valueLength >= outputSize) return -1;  // Ensure there's room in the output buffer
+
+  strncpy(output, valueStart, valueLength);
+  output[valueLength] = '\0';  // Null-terminate the string
+
+  return 0;
+}
 
 /*
 ** Write directly to the file passed as the first argument. Even if the
@@ -164,8 +247,9 @@ static int demoDirectWrite(
   int iAmt,                       /* Size of data to write in bytes */
   sqlite_int64 iOfst              /* File offset to write to */
 ){
-  off_t ofst;                     /* Return value from lseek() */
-  size_t nWrite;                  /* Return value from write() */
+  /*
+  off_t ofst;
+  size_t nWrite;
 
   ofst = lseek(p->fd, iOfst, SEEK_SET);
   if( ofst!=iOfst ){
@@ -176,6 +260,52 @@ static int demoDirectWrite(
   if( nWrite!=iAmt ){
     return SQLITE_IOERR_WRITE;
   }
+  */
+
+  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  char temp[512];
+  int ipc_length = snprintf(
+    temp,
+    sizeof(temp),
+    "{"
+      "\"WriteOffest\": {"
+        "\"identifier\": \"%s\","
+        "\"full_path\": \"%s\","
+        "\"offset\": %llu,"
+      "}"
+    "}",
+    p->zIdentifier,
+    p->zName,
+    (unsigned long long)iOfst
+  );
+  OptionStr request_ipc = {
+    .is_empty = 1,
+    .string = temp,
+  };
+  OptionStr empty_option_str = {
+    .is_empty = 0,
+    .string = "",
+  };
+  Bytes bytes = {
+    .data = zBuf,
+    .len = iAmt,
+  };
+  Payload payload = {
+    .is_empty = 1,
+    .mime = &empty_option_str,
+    .bytes = &bytes,
+  };
+
+  IpcMetadata *response = send_and_await_response_wrapped(
+    "n.uq",
+    &target_process,
+    &request_ipc,
+    &empty_option_str,
+    &payload,
+    5
+  );
+
+  /* TODO: check response is not an error */
 
   return SQLITE_OK;
 }
@@ -196,23 +326,27 @@ static int demoFlushBuffer(DemoFile *p){
 
 /*
 ** Close a file.
+** TODO: required, or is noop acceptable?
 */
 static int demoClose(sqlite3_file *pFile){
-  int rc;
-  DemoFile *p = (DemoFile*)pFile;
-  rc = demoFlushBuffer(p);
-  sqlite3_free(p->aBuffer);
-  close(p->fd);
-  return rc;
+  /*
+    int rc;
+    DemoFile *p = (DemoFile*)pFile;
+    rc = demoFlushBuffer(p);
+    sqlite3_free(p->aBuffer);
+    close(p->fd);
+    return rc;
+  */
+  return SQLITE_OK;
 }
 
 /*
 ** Read data from a file.
 */
 static int demoRead(
-  sqlite3_file *pFile, 
-  void *zBuf, 
-  int iAmt, 
+  sqlite3_file *pFile,
+  void *zBuf,
+  int iAmt,
   sqlite_int64 iOfst
 ){
   DemoFile *p = (DemoFile*)pFile;
@@ -222,7 +356,7 @@ static int demoRead(
 
   /* Flush any data in the write buffer to disk in case this operation
   ** is trying to read data the file-region currently cached in the buffer.
-  ** It would be possible to detect this case and possibly save an 
+  ** It would be possible to detect this case and possibly save an
   ** unnecessary write here, but in practice SQLite will rarely read from
   ** a journal file when there is data cached in the write-buffer.
   */
@@ -231,6 +365,7 @@ static int demoRead(
     return rc;
   }
 
+  /*
   ofst = lseek(p->fd, iOfst, SEEK_SET);
   if( ofst!=iOfst ){
     return SQLITE_IOERR_READ;
@@ -242,21 +377,81 @@ static int demoRead(
   }else if( nRead>=0 ){
     return SQLITE_IOERR_SHORT_READ;
   }
+  */
 
-  return SQLITE_IOERR_READ;
+  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  char temp[512];
+  int ipc_length = snprintf(
+    temp,
+    sizeof(temp),
+    "{"
+      "\"GetFileChunk\": {"
+        "\"identifier\": \"%s\","
+        "\"full_path\": \"%s\","
+        "\"offset\": %llu,"
+        "\"length\": %llu,"
+      "}"
+    "}",
+    p->zIdentifier,
+    p->zName,
+    (unsigned long long)iOfst,
+    (unsigned long long)iAmt
+  );
+  OptionStr request_ipc = {
+    .is_empty = 1,
+    .string = temp,
+  };
+  OptionStr empty_option_str = {
+    .is_empty = 0,
+    .string = "",
+  };
+  Bytes empty_bytes = {
+    .data = NULL,
+    .len = 0,
+  };
+  Payload request_payload = {
+    .is_empty = 1,
+    .mime = &empty_option_str,
+    .bytes = &empty_bytes,
+  };
+
+  IpcMetadata *response = send_and_await_response_wrapped(
+    "n.uq",
+    &target_process,
+    &request_ipc,
+    &empty_option_str,
+    &request_payload,
+    5
+  );
+
+  /* TODO: check response is not an error */
+
+  Payload* response_payload = get_payload_wrapped();
+  if( response_payload->is_empty == 0 ){
+    /* payload must be non-empty */
+    return SQLITE_IOERR_READ;
+  }
+  if ( response_payload->bytes->len != iAmt ){
+    /* payload must contain correct amount of bytes */
+    return SQLITE_IOERR_READ;
+  }
+
+  zBuf = response_payload->bytes->data;
+
+  return SQLITE_OK;
 }
 
 /*
 ** Write data to a crash-file.
 */
 static int demoWrite(
-  sqlite3_file *pFile, 
-  const void *zBuf, 
-  int iAmt, 
+  sqlite3_file *pFile,
+  const void *zBuf,
+  int iAmt,
   sqlite_int64 iOfst
 ){
   DemoFile *p = (DemoFile*)pFile;
-  
+
   if( p->aBuffer ){
     char *z = (char *)zBuf;       /* Pointer to remaining data to write */
     int n = iAmt;                 /* Number of bytes at z */
@@ -267,7 +462,7 @@ static int demoWrite(
 
       /* If the buffer is full, or if this data is not being written directly
       ** following the data already buffered, flush the buffer. Flushing
-      ** the buffer is a no-op if it is empty.  
+      ** the buffer is a no-op if it is empty.
       */
       if( p->nBuffer==SQLITE_DEMOVFS_BUFFERSZ || p->iBufferOfst+p->nBuffer!=i ){
         int rc = demoFlushBuffer(p);
@@ -302,26 +497,14 @@ static int demoWrite(
 ** the top of the file).
 */
 static int demoTruncate(sqlite3_file *pFile, sqlite_int64 size){
-#if 0
-  if( ftruncate(((DemoFile *)pFile)->fd, size) ) return SQLITE_IOERR_TRUNCATE;
-#endif
   return SQLITE_OK;
 }
 
 /*
-** Sync the contents of the file to the persistent media.
+** Sync the contents of the file to the persistent media: no-op.
 */
 static int demoSync(sqlite3_file *pFile, int flags){
-  DemoFile *p = (DemoFile*)pFile;
-  int rc;
-
-  rc = demoFlushBuffer(p);
-  if( rc!=SQLITE_OK ){
-    return rc;
-  }
-
-  rc = fsync(p->fd);
-  return (rc==0 ? SQLITE_OK : SQLITE_IOERR_FSYNC);
+  return SQLITE_OK;
 }
 
 /*
@@ -342,9 +525,68 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
     return rc;
   }
 
+  /*
   rc = fstat(p->fd, &sStat);
   if( rc!=0 ) return SQLITE_IOERR_FSTAT;
   *pSize = sStat.st_size;
+  */
+
+  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  char temp[512];
+  int ipc_length = snprintf(
+    temp,
+    sizeof(temp),
+    "{"
+      "\"GetEntryLength\": {"
+        "\"identifier\": \"%s\","
+        "\"full_path\": \"%s\","
+      "}"
+    "}",
+    p->zIdentifier,
+    p->zName
+  );
+  OptionStr request_ipc = {
+    .is_empty = 1,
+    .string = temp,
+  };
+  OptionStr empty_option_str = {
+    .is_empty = 0,
+    .string = "",
+  };
+  Bytes empty_bytes = {
+    .data = NULL,
+    .len = 0,
+  };
+  Payload request_payload = {
+    .is_empty = 1,
+    .mime = &empty_option_str,
+    .bytes = &empty_bytes,
+  };
+
+  IpcMetadata *response = send_and_await_response_wrapped(
+    "n.uq",
+    &target_process,
+    &request_ipc,
+    &empty_option_str,
+    &request_payload,
+    5
+  );
+
+  if( response->ipc->is_empty == 0 ) {
+    /* ipc must be populated */
+    return SQLITE_IOERR_READ;
+  }
+
+  char value[512];
+  if( getJsonValue(response->ipc->string, "length", value, sizeof(value)) != 0 ){
+    /* could not find expected value */
+    return SQLITE_IOERR_READ;
+  }
+
+  char *endptr;
+  unsigned long long length = strtoull(value, &endptr, 10);
+  *pSize = (sqlite3_int64)length;
+
   return SQLITE_OK;
 }
 
@@ -374,7 +616,7 @@ static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
 
 /*
 ** The xSectorSize() and xDeviceCharacteristics() methods. These two
-** may return special values allowing SQLite to optimize file-system 
+** may return special values allowing SQLite to optimize file-system
 ** access to some extent. But it is also safe to simply return 0.
 */
 static int demoSectorSize(sqlite3_file *pFile){
@@ -411,7 +653,7 @@ static int demoOpen(
   };
 
   DemoFile *p = (DemoFile*)pFile; /* Populate this structure */
-  int oflags = 0;                 /* flags to pass to open() call */
+  /* int oflags = 0; */                 /* flags to pass to open() call */
   char *aBuf = 0;
 
   if( zName==0 ){
@@ -425,16 +667,24 @@ static int demoOpen(
     }
   }
 
+  /*
   if( flags&SQLITE_OPEN_EXCLUSIVE ) oflags |= O_EXCL;
   if( flags&SQLITE_OPEN_CREATE )    oflags |= O_CREAT;
   if( flags&SQLITE_OPEN_READONLY )  oflags |= O_RDONLY;
   if( flags&SQLITE_OPEN_READWRITE ) oflags |= O_RDWR;
+  */
 
   memset(p, 0, sizeof(DemoFile));
+  /*
   p->fd = open(zName, oflags, 0600);
   if( p->fd<0 ){
     sqlite3_free(aBuf);
     return SQLITE_CANTOPEN;
+  }
+  */
+  p->zIdentifier = strtok(zName, ":");
+  if (p->zName != NULL) {
+    p->zName = strtok(NULL, ":");
   }
   p->aBuffer = aBuf;
 
@@ -449,34 +699,10 @@ static int demoOpen(
 ** Delete the file identified by argument zPath. If the dirSync parameter
 ** is non-zero, then ensure the file-system modification to delete the
 ** file has been synced to disk before returning.
+** TODO: does this work as noop?
 */
 static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
-  int rc;                         /* Return code */
-
-  rc = unlink(zPath);
-  if( rc!=0 && errno==ENOENT ) return SQLITE_OK;
-
-  if( rc==0 && dirSync ){
-    int dfd;                      /* File descriptor open on directory */
-    int i;                        /* Iterator variable */
-    char zDir[MAXPATHNAME+1];     /* Name of directory containing file zPath */
-
-    /* Figure out the directory name from the path of the file deleted. */
-    sqlite3_snprintf(MAXPATHNAME, zDir, "%s", zPath);
-    zDir[MAXPATHNAME] = '\0';
-    for(i=strlen(zDir); i>1 && zDir[i]!='/'; i++);
-    zDir[i] = '\0';
-
-    /* Open a file-descriptor on the directory. Sync. Close. */
-    dfd = open(zDir, O_RDONLY, 0);
-    if( dfd<0 ){
-      rc = -1;
-    }else{
-      rc = fsync(dfd);
-      close(dfd);
-    }
-  }
-  return (rc==0 ? SQLITE_OK : SQLITE_IOERR_DELETE);
+    return SQLITE_OK;
 }
 
 #ifndef F_OK
@@ -494,9 +720,9 @@ static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
 ** is both readable and writable.
 */
 static int demoAccess(
-  sqlite3_vfs *pVfs, 
-  const char *zPath, 
-  int flags, 
+  sqlite3_vfs *pVfs,
+  const char *zPath,
+  int flags,
   int *pResOut
 ){
   int rc;                         /* access() return code */
@@ -512,18 +738,79 @@ static int demoAccess(
 
   rc = access(zPath, eAccess);
   *pResOut = (rc==0);
+
+  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  char temp[512];
+
+  char *identifier;
+  char *name;
+  identifier = strtok(zPath, ":");
+  if (identifier != NULL) {
+    name = strtok(NULL, ":");
+  }
+
+  int ipc_length = snprintf(
+    temp,
+    sizeof(temp),
+    "{"
+      "\"GetHash\": {"
+        "\"identifier\": \"%s\","
+        "\"full_path\": \"%s\","
+      "}"
+    "}",
+    identifier,
+    name
+  );
+  OptionStr request_ipc = {
+    .is_empty = 1,
+    .string = temp,
+  };
+  OptionStr empty_option_str = {
+    .is_empty = 0,
+    .string = "",
+  };
+  Bytes empty_bytes = {
+    .data = NULL,
+    .len = 0,
+  };
+  Payload request_payload = {
+    .is_empty = 1,
+    .mime = &empty_option_str,
+    .bytes = &empty_bytes,
+  };
+
+  IpcMetadata *response = send_and_await_response_wrapped(
+    "n.uq",
+    &target_process,
+    &request_ipc,
+    &empty_option_str,
+    &request_payload,
+    5
+  );
+
+  if( response->ipc->is_empty == 0 ) {
+    return SQLITE_IOERR_READ;
+  }
+
+  char value[512];
+  if( getJsonValue(response->ipc->string, "hash", value, sizeof(value)) == 0 ){
+    *pResOut = 0;
+  } else {
+    *pResOut = -1;
+  }
+
   return SQLITE_OK;
 }
 
 /*
 ** Argument zPath points to a nul-terminated string containing a file path.
-** If zPath is an absolute path, then it is copied as is into the output 
+** If zPath is an absolute path, then it is copied as is into the output
 ** buffer. Otherwise, if it is a relative path, then the equivalent full
 ** path is written to the output buffer.
 **
 ** This function assumes that paths are UNIX style. Specifically, that:
 **
-**   1. Path components are separated by a '/'. and 
+**   1. Path components are separated by a '/'. and
 **   2. Full paths begin with a '/' character.
 */
 static int demoFullPathname(
@@ -573,7 +860,7 @@ static int demoRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
 }
 
 /*
-** Sleep for at least nMicro microseconds. Return the (approximate) number 
+** Sleep for at least nMicro microseconds. Return the (approximate) number
 ** of microseconds slept for.
 */
 static int demoSleep(sqlite3_vfs *pVfs, int nMicro){
@@ -589,13 +876,13 @@ static int demoSleep(sqlite3_vfs *pVfs, int nMicro){
 **   http://en.wikipedia.org/wiki/Julian_day
 **
 ** This implementation is not very good. The current time is rounded to
-** an integer number of seconds. Also, assuming time_t is a signed 32-bit 
+** an integer number of seconds. Also, assuming time_t is a signed 32-bit
 ** value, it will stop working some time in the year 2038 AD (the so-called
-** "year 2038" problem that afflicts systems that store time this way). 
+** "year 2038" problem that afflicts systems that store time this way).
 */
 static int demoCurrentTime(sqlite3_vfs *pVfs, double *pTime){
   time_t t = time(0);
-  *pTime = t/86400.0 + 2440587.5; 
+  *pTime = t/86400.0 + 2440587.5;
   return SQLITE_OK;
 }
 
