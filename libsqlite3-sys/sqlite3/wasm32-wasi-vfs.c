@@ -152,6 +152,7 @@ typedef struct DemoFile DemoFile;
 struct DemoFile {
   sqlite3_file base;              /* Base class. Must be first. */
   /* int fd; */                        /* File descriptor */
+  char *zOurNode;
   char *zIdentifier;
   char *zName;
 
@@ -181,9 +182,9 @@ struct Payload {
 
 typedef struct ProcessId ProcessId;
 struct ProcessId {
-    int result_number;
-    unsigned long long id;
-    const char *name;
+    const char *process_name;
+    const char *package_name;
+    const char *publisher_node;
 };
 
 typedef struct IpcMetadata IpcMetadata;
@@ -262,16 +263,18 @@ static int demoDirectWrite(
   }
   */
 
-  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[512];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
     "{"
-      "\"WriteOffest\": {"
-        "\"identifier\": \"%s\","
-        "\"full_path\": \"%s\","
-        "\"offset\": %llu,"
+      "\"drive\": \"%s\","
+      "\"action\": {"
+        "\"WriteOffset\": {"
+          "\"full_path\": \"%s\","
+          "\"offset\": %llu"
+        "}"
       "}"
     "}",
     p->zIdentifier,
@@ -297,7 +300,7 @@ static int demoDirectWrite(
   };
 
   IpcMetadata *response = send_and_await_response_wrapped(
-    "n.uq",
+    p->zOurNode,
     &target_process,
     &request_ipc,
     &empty_option_str,
@@ -379,17 +382,19 @@ static int demoRead(
   }
   */
 
-  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[512];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
     "{"
-      "\"GetFileChunk\": {"
-        "\"identifier\": \"%s\","
-        "\"full_path\": \"%s\","
-        "\"offset\": %llu,"
-        "\"length\": %llu,"
+      "\"drive\": \"%s\","
+      "\"action\": {"
+        "\"GetFileChunk\": {"
+          "\"full_path\": \"%s\","
+          "\"offset\": %llu,"
+          "\"length\": %llu"
+        "}"
       "}"
     "}",
     p->zIdentifier,
@@ -416,7 +421,7 @@ static int demoRead(
   };
 
   IpcMetadata *response = send_and_await_response_wrapped(
-    "n.uq",
+    p->zOurNode,
     &target_process,
     &request_ipc,
     &empty_option_str,
@@ -424,19 +429,29 @@ static int demoRead(
     5
   );
 
-  /* TODO: check response is not an error */
+  if( response->ipc->is_empty == 0 ){
+    /* ipc must be populated */
+    return SQLITE_IOERR_READ;
+  }
+
+  char value[512];
+  if( getJsonValue(response->ipc->string, "Err", value, sizeof(value)) == 0 ){
+    /* got error */
+    return SQLITE_IOERR_READ;
+  }
 
   Payload* response_payload = get_payload_wrapped();
   if( response_payload->is_empty == 0 ){
     /* payload must be non-empty */
-    return SQLITE_IOERR_READ;
-  }
-  if ( response_payload->bytes->len != iAmt ){
-    /* payload must contain correct amount of bytes */
-    return SQLITE_IOERR_READ;
+    return SQLITE_IOERR_SHORT_READ;
   }
 
   zBuf = response_payload->bytes->data;
+
+  if ( response_payload->bytes->len != iAmt ){
+    /* payload must contain correct amount of bytes */
+    return SQLITE_IOERR_SHORT_READ;
+  }
 
   return SQLITE_OK;
 }
@@ -531,15 +546,15 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
   *pSize = sStat.st_size;
   */
 
-  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[512];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
     "{"
-      "\"GetEntryLength\": {"
-        "\"identifier\": \"%s\","
-        "\"full_path\": \"%s\","
+      "\"drive\": \"%s\","
+      "\"action\": {"
+        "\"GetEntryLength\": \"%s\""
       "}"
     "}",
     p->zIdentifier,
@@ -564,7 +579,7 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
   };
 
   IpcMetadata *response = send_and_await_response_wrapped(
-    "n.uq",
+    p->zOurNode,
     &target_process,
     &request_ipc,
     &empty_option_str,
@@ -578,8 +593,13 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
   }
 
   char value[512];
-  if( getJsonValue(response->ipc->string, "length", value, sizeof(value)) != 0 ){
+  if( getJsonValue(response->ipc->string, "GetEntryLength", value, sizeof(value)) != 0 ){
     /* could not find expected value */
+    return SQLITE_IOERR_READ;
+  }
+
+  if( strcmp(value, "null") != 0 ) {
+    /* file DNE */
     return SQLITE_IOERR_READ;
   }
 
@@ -682,15 +702,69 @@ static int demoOpen(
     return SQLITE_CANTOPEN;
   }
   */
-  p->zIdentifier = strtok(zName, ":");
-  if (p->zName != NULL) {
-    p->zName = strtok(NULL, ":");
+  p->zOurNode = strtok(zName, ":");
+  if (p->zOurNode == NULL) {
+    return SQLITE_IOERR_READ;
   }
+  p->zIdentifier = strtok(NULL, ":");
+  if (p->zIdentifier == NULL) {
+    return SQLITE_IOERR_READ;
+  }
+  p->zName = strtok(NULL, ":");
   p->aBuffer = aBuf;
 
   if( pOutFlags ){
     *pOutFlags = flags;
   }
+
+  ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
+  char temp[512];
+  int ipc_length = snprintf(
+    temp,
+    sizeof(temp),
+    "{"
+      "\"drive\": \"%s\","
+      "\"action\": {"
+        "\"Add\": {"
+          "\"full_path\": \"%s\","
+          "\"entry_type\": \"NewFile\""
+          /* "\"entry_type\": {"
+          **   "\"AddEntryType\": \"NewFile\""
+          ** "}"
+          */
+        "}"
+      "}"
+    "}",
+    p->zIdentifier,
+    p->zName
+  );
+  OptionStr request_ipc = {
+    .is_empty = 1,
+    .string = temp,
+  };
+  OptionStr empty_option_str = {
+    .is_empty = 0,
+    .string = "",
+  };
+  Bytes bytes = {
+    .data = "",
+    .len = 0,
+  };
+  Payload payload = {
+    .is_empty = 1,
+    .mime = &empty_option_str,
+    .bytes = &bytes,
+  };
+
+  IpcMetadata *response = send_and_await_response_wrapped(
+    p->zOurNode,
+    &target_process,
+    &request_ipc,
+    &empty_option_str,
+    &payload,
+    5
+  );
+
   p->base.pMethods = &demoio;
   return SQLITE_OK;
 }
@@ -739,26 +813,32 @@ static int demoAccess(
   rc = access(zPath, eAccess);
   *pResOut = (rc==0);
 
-  ProcessId target_process = {.result_number = 1, .id = 0, .name = "vfs"};
+  ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[512];
 
-  char *identifier;
+  char *our_node;
+  char *drive;
   char *name;
-  identifier = strtok(zPath, ":");
-  if (identifier != NULL) {
-    name = strtok(NULL, ":");
+  our_node = strtok(zPath, ":");
+  if (our_node == NULL) {
+    return SQLITE_IOERR_READ;
   }
+  drive = strtok(zPath, ":");
+  if (drive == NULL) {
+    return SQLITE_IOERR_READ;
+  }
+  name = strtok(NULL, ":");
 
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
     "{"
-      "\"GetHash\": {"
-        "\"identifier\": \"%s\","
-        "\"full_path\": \"%s\","
+      "\"drive\": \"%s\","
+      "\"action\": {"
+        "\"GetHash\": \"%s\""
       "}"
     "}",
-    identifier,
+    drive,
     name
   );
   OptionStr request_ipc = {
@@ -780,7 +860,7 @@ static int demoAccess(
   };
 
   IpcMetadata *response = send_and_await_response_wrapped(
-    "n.uq",
+    our_node,
     &target_process,
     &request_ipc,
     &empty_option_str,
@@ -793,10 +873,14 @@ static int demoAccess(
   }
 
   char value[512];
-  if( getJsonValue(response->ipc->string, "hash", value, sizeof(value)) == 0 ){
+  if( getJsonValue(response->ipc->string, "GetHash", value, sizeof(value)) == 0 ){
+    if( strcmp(value, "null") != 0 ) {
+      /* file DNE */
+      return SQLITE_IOERR_READ;
+    }
     *pResOut = 0;
   } else {
-    *pResOut = -1;
+    return SQLITE_IOERR_READ;
   }
 
   return SQLITE_OK;
