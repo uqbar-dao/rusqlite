@@ -342,7 +342,6 @@ static int demoClose(sqlite3_file *pFile){
   sqlite3_free(p->zIdentifier);
   sqlite3_free(p->zName);
   sqlite3_free(p->aBuffer);
-  // close(p->fd);
   return rc;
 }
 
@@ -434,15 +433,13 @@ static int demoRead(
 
   if( response.ipc->is_empty == 0 ){
     // ipc must be populated
-    return -1;
-    // return SQLITE_IOERR_READ;
+    return SQLITE_IOERR_READ;
   }
 
   char value[256];
   if( getJsonValue(response.ipc->string, "Err", value, sizeof(value)) == 0 ){
     // got error
-    return -2;
-    // return SQLITE_IOERR_READ;
+    return SQLITE_IOERR_READ;
   }
 
   char mime_string[256];
@@ -480,8 +477,6 @@ static int demoRead(
     memset(zBuf + response_payload.bytes->len, 0, iAmt - response_payload.bytes->len);
     return SQLITE_IOERR_SHORT_READ;
   }
-
-  // zBuf = &bytes_data;
 
   return SQLITE_OK;
 }
@@ -621,21 +616,18 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 
   if( response.ipc->is_empty == 0 ) {
     // ipc must be populated
-    return -3;
-    // return SQLITE_IOERR_READ;
+    return SQLITE_IOERR_READ;
   }
 
   char value[256];
   if( getJsonValue(response.ipc->string, "GetEntryLength", value, sizeof(value)) != 0 ){
     // could not find expected value
-    return -4;
-    // return SQLITE_IOERR_READ;
+    return SQLITE_IOERR_READ;
   }
 
   if( strcmp(value, "null") == 0 ) {
     // file DNE
-    return -5;
-    // return SQLITE_IOERR_READ;
+    return SQLITE_IOERR_READ;
   }
 
   char *endptr;
@@ -727,82 +719,26 @@ static int demoOpen(
   zNameBackup = sqlite3_malloc(strlen(zName) + 1);
   strcpy(zNameBackup, zName);
 
-  if (strchr(zNameBackup, ':')) {
-    char *token = strtok(zNameBackup, ":");
-    if (token == NULL) {
-      return -6;
-      // return SQLITE_IOERR_READ;
-    }
-    p->zOurNode = sqlite3_malloc(strlen(token) + 1);
-    strcpy(p->zOurNode, token);
-    token = strtok(NULL, ":");
-    if (token == NULL) {
-      return -7;
-      // return SQLITE_IOERR_READ;
-    }
-    p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
-    strcpy(p->zIdentifier, token);
-    token = strtok(NULL, ":");
-    if (token == NULL) {
-      return -8;
-      // return SQLITE_IOERR_READ;
-    }
-    p->zName = sqlite3_malloc(strlen(token) + 1);
-    strcpy(p->zName, token);
-  } else {
-    p->zOurNode = sqlite3_malloc(strlen("n.uq") + 1);
-    strcpy(p->zOurNode, "n.uq");
-    p->zIdentifier = sqlite3_malloc(strlen("sqlite-foobar") + 1);
-    strcpy(p->zIdentifier, "sqlite-foobar");
-    p->zName = sqlite3_malloc(strlen(zName) + 1);
-    strcpy(p->zName, zName);
+  char *token = strtok(zNameBackup, ":");
+  if (token == NULL) {
+    return SQLITE_IOERR_READ;
   }
+  p->zOurNode = sqlite3_malloc(strlen(token) + 1);
+  strcpy(p->zOurNode, token);
+  token = strtok(NULL, ":");
+  if (token == NULL) {
+    return SQLITE_IOERR_READ;
+  }
+  p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
+  strcpy(p->zIdentifier, token);
+  token = strtok(NULL, ":");
+  if (token == NULL) {
+    return SQLITE_IOERR_READ;
+  }
+  p->zName = sqlite3_malloc(strlen(token) + 1);
+  strcpy(p->zName, token);
 
   sqlite3_free(zNameBackup);
-
-  // char *token = strtok(zName, ":");
-  // if (token == NULL) {
-  //   return -6;
-  //   // return SQLITE_IOERR_READ;
-  // }
-  // p->zOurNode = sqlite3_malloc(strlen(token) + 1);
-  // strcpy(p->zOurNode, token);
-  // token = strtok(NULL, ":");
-
-  // if (token == NULL) {
-  //   strcpy(p->zOurNode, "n.uq");
-  //   p->zIdentifier = sqlite3_malloc(strlen("sqlite-foobar") + 1);
-  //   strcpy(p->zIdentifier, "sqlite-foobar");
-  //   p->zName = sqlite3_malloc(strlen(zNameBackup) + 1);
-  //   strcpy(p->zName, zNameBackup);
-  //   // return -7;
-  //   // return SQLITE_IOERR_READ;
-  // } else {
-  //   p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
-  //   strcpy(p->zIdentifier, token);
-  //   token = strtok(NULL, ":");
-  //   if (token == NULL) {
-  //     return -8;
-  //     // return SQLITE_IOERR_READ;
-  //   }
-  //   p->zName = sqlite3_malloc(strlen(token) + 1);
-  //   strcpy(p->zName, token);
-  // }
-  // free(zNameBackup);
-
-  // // if (token == NULL) {
-  // //   return -7;
-  // //   // return SQLITE_IOERR_READ;
-  // // }
-  // // p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
-  // // strcpy(p->zIdentifier, token);
-  // // token = strtok(NULL, ":");
-  // // if (token == NULL) {
-  // //   return -8;
-  // //   // return SQLITE_IOERR_READ;
-  // // }
-  // // p->zName = sqlite3_malloc(strlen(token) + 1);
-  // // strcpy(p->zName, token);
 
   if( pOutFlags ){
     *pOutFlags = flags;
@@ -900,90 +836,6 @@ static int demoAccess(
   int *pResOut
 ){
   print_to_terminal_wrapped(0, 16);
-  // ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
-  // char temp[512];
-
-  // char *our_node;
-  // char *drive;
-  // char *name;
-  // our_node = strtok(zPath, ":");
-  // if (our_node == NULL) {
-  //   return SQLITE_IOERR_READ;
-  // }
-  // drive = strtok(NULL, ":");
-  // if (drive == NULL) {
-  //   return SQLITE_IOERR_READ;
-  // }
-  // name = strtok(NULL, ":");
-
-  // int ipc_length = snprintf(
-  //   temp,
-  //   sizeof(temp),
-  //   "{"
-  //     "\"drive\": \"%s\","
-  //     "\"action\": {"
-  //       "\"GetHash\": \"%s\""
-  //     "}"
-  //   "}",
-  //   drive,
-  //   name
-  // );
-  // OptionStr request_ipc = {
-  //   .is_empty = 1,
-  //   .string = temp,
-  // };
-  // OptionStr empty_option_str = {
-  //   .is_empty = 0,
-  //   .string = "",
-  // };
-  // Bytes empty_bytes = {
-  //   .data = NULL,
-  //   .len = 0,
-  // };
-  // Payload request_payload = {
-  //   .is_empty = 1,
-  //   .mime = &empty_option_str,
-  //   .bytes = &empty_bytes,
-  // };
-
-  // char ipc_string[1024];
-  // char metadata_string[1024];
-  // OptionStr ipc = {
-  //     .is_empty = 0,
-  //     .string = ipc_string,
-  // };
-  // OptionStr metadata = {
-  //     .is_empty = 0,
-  //     .string = metadata_string,
-  // };
-  // IpcMetadata response = {
-  //     .ipc = &ipc,
-  //     .metadata = &metadata,
-  // };
-
-  // send_and_await_response_wrapped(
-  //   our_node,
-  //   &target_process,
-  //   &request_ipc,
-  //   &empty_option_str,
-  //   &request_payload,
-  //   5,
-  //   &response
-  // );
-
-  // if( response.ipc->is_empty == 0 ) {
-  //   return SQLITE_IOERR_READ;
-  // }
-
-  // char value[512];
-  // if( getJsonValue(response.ipc->string, "GetHash", value, sizeof(value)) == 0 ){
-  //   if( strcmp(value, "null") != 0 ) {
-  //     return SQLITE_IOERR_READ;
-  //   }
-  //   *pResOut = 0;
-  // } else {
-  //   return SQLITE_IOERR_READ;
-  // }
 
   *pResOut = 0;
   return SQLITE_OK;
