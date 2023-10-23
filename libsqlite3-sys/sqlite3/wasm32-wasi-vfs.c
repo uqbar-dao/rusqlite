@@ -242,7 +242,7 @@ int getJsonValue(const char *json, const char *key, char *output, int outputSize
 
 // Write directly to the file passed as the first argument. Even if the
 // file has a write-buffer (DemoFile.aBuffer), ignore it.
-static int demoDirectWrite(
+static int uqbarDirectWrite(
   DemoFile *p,                    // File handle
   const void *zBuf,               // Buffer containing data to write
   int iAmt,                       // Size of data to write in bytes
@@ -320,11 +320,11 @@ static int demoDirectWrite(
 // Flush the contents of the DemoFile.aBuffer buffer to disk. This is a
 // no-op if this particular file does not have a buffer (i.e. it is not
 // a journal file) or if the buffer is currently empty.
-static int demoFlushBuffer(DemoFile *p){
+static int uqbarFlushBuffer(DemoFile *p){
   print_to_terminal_wrapped(0, 1);
   int rc = SQLITE_OK;
   if( p->nBuffer ){
-    rc = demoDirectWrite(p, p->aBuffer, p->nBuffer, p->iBufferOfst);
+    rc = uqbarDirectWrite(p, p->aBuffer, p->nBuffer, p->iBufferOfst);
     p->nBuffer = 0;
   }
   return rc;
@@ -333,11 +333,11 @@ static int demoFlushBuffer(DemoFile *p){
 // Close a file.
 // TODO: required, or is noop acceptable?
 // TODO: free OurNode, Identifier, Name, Buffer
-static int demoClose(sqlite3_file *pFile){
+static int uqbarClose(sqlite3_file *pFile){
   print_to_terminal_wrapped(0, 2);
   int rc;
   DemoFile *p = (DemoFile*)pFile;
-  rc = demoFlushBuffer(p);
+  rc = uqbarFlushBuffer(p);
   sqlite3_free(p->zOurNode);
   sqlite3_free(p->zIdentifier);
   sqlite3_free(p->zName);
@@ -346,7 +346,7 @@ static int demoClose(sqlite3_file *pFile){
 }
 
 // Read data from a file.
-static int demoRead(
+static int uqbarRead(
   sqlite3_file *pFile,
   void *zBuf,
   int iAmt,
@@ -356,14 +356,14 @@ static int demoRead(
   DemoFile *p = (DemoFile*)pFile;
   off_t ofst;                     // Return value from lseek()
   int nRead;                      // Return value from read()
-  int rc;                         // Return code from demoFlushBuffer()
+  int rc;                         // Return code from uqbarFlushBuffer()
 
   // Flush any data in the write buffer to disk in case this operation
   // is trying to read data the file-region currently cached in the buffer.
   // It would be possible to detect this case and possibly save an
   // unnecessary write here, but in practice SQLite will rarely read from
   // a journal file when there is data cached in the write-buffer.
-  rc = demoFlushBuffer(p);
+  rc = uqbarFlushBuffer(p);
   if( rc!=SQLITE_OK ){
     return rc;
   }
@@ -482,7 +482,7 @@ static int demoRead(
 }
 
 // Write data to a crash-file.
-static int demoWrite(
+static int uqbarWrite(
   sqlite3_file *pFile,
   const void *zBuf,
   int iAmt,
@@ -503,7 +503,7 @@ static int demoWrite(
       // following the data already buffered, flush the buffer. Flushing
       // the buffer is a no-op if it is empty.
       if( p->nBuffer==SQLITE_DEMOVFS_BUFFERSZ || p->iBufferOfst+p->nBuffer!=i ){
-        int rc = demoFlushBuffer(p);
+        int rc = uqbarFlushBuffer(p);
         if( rc!=SQLITE_OK ){
           return rc;
         }
@@ -524,7 +524,7 @@ static int demoWrite(
       z += nCopy;
     }
   }else{
-    return demoDirectWrite(p, zBuf, iAmt, iOfst);
+    return uqbarDirectWrite(p, zBuf, iAmt, iOfst);
   }
 
   return SQLITE_OK;
@@ -532,27 +532,27 @@ static int demoWrite(
 
 // Truncate a file. This is a no-op for this VFS (see header comments at
 // the top of the file).
-static int demoTruncate(sqlite3_file *pFile, sqlite_int64 size){
+static int uqbarTruncate(sqlite3_file *pFile, sqlite_int64 size){
   print_to_terminal_wrapped(0, 5);
   return SQLITE_OK;
 }
 
 // Sync the contents of the file to the persistent media: no-op.
-static int demoSync(sqlite3_file *pFile, int flags){
+static int uqbarSync(sqlite3_file *pFile, int flags){
   print_to_terminal_wrapped(0, 6);
   return SQLITE_OK;
 }
 
 // Write the size of the file in bytes to *pSize.
-static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
+static int uqbarFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
   print_to_terminal_wrapped(0, 7);
   DemoFile *p = (DemoFile*)pFile;
 
   // Flush the contents of the buffer to disk. As with the flush in the
-  // demoRead() method, it would be possible to avoid this and save a write
+  // uqbarRead() method, it would be possible to avoid this and save a write
   // here and there. But in practice this comes up so infrequently it is
   // not worth the trouble.
-  int rc = demoFlushBuffer(p);
+  int rc = uqbarFlushBuffer(p);
   if( rc!=SQLITE_OK ){
     return rc;
   }
@@ -641,22 +641,22 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 // The xCheckReservedLock() always indicates that no other process holds
 // a reserved lock on the database file. This ensures that if a hot-journal
 // file is found in the file-system it is rolled back.
-static int demoLock(sqlite3_file *pFile, int eLock){
+static int uqbarLock(sqlite3_file *pFile, int eLock){
   print_to_terminal_wrapped(0, 8);
   return SQLITE_OK;
 }
-static int demoUnlock(sqlite3_file *pFile, int eLock){
+static int uqbarUnlock(sqlite3_file *pFile, int eLock){
   print_to_terminal_wrapped(0, 9);
   return SQLITE_OK;
 }
-static int demoCheckReservedLock(sqlite3_file *pFile, int *pResOut){
+static int uqbarCheckReservedLock(sqlite3_file *pFile, int *pResOut){
   print_to_terminal_wrapped(0, 10);
   *pResOut = 0;
   return SQLITE_OK;
 }
 
 // No xFileControl() verbs are implemented by this VFS.
-static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
+static int uqbarFileControl(sqlite3_file *pFile, int op, void *pArg){
   print_to_terminal_wrapped(0, 11);
   return SQLITE_OK;
 }
@@ -664,17 +664,17 @@ static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
 // The xSectorSize() and xDeviceCharacteristics() methods. These two
 // may return special values allowing SQLite to optimize file-system
 // access to some extent. But it is also safe to simply return 0.
-static int demoSectorSize(sqlite3_file *pFile){
+static int uqbarSectorSize(sqlite3_file *pFile){
   print_to_terminal_wrapped(0, 12);
   return 0;
 }
-static int demoDeviceCharacteristics(sqlite3_file *pFile){
+static int uqbarDeviceCharacteristics(sqlite3_file *pFile){
   print_to_terminal_wrapped(0, 13);
   return 0;
 }
 
 // Open a file handle.
-static int demoOpen(
+static int uqbarOpen(
   sqlite3_vfs *pVfs,              // VFS
   const char *zName,              // File to open, or 0 for a temp file
   sqlite3_file *pFile,            // Pointer to DemoFile struct to populate
@@ -682,20 +682,20 @@ static int demoOpen(
   int *pOutFlags                  // Output SQLITE_OPEN_XXX flags (or NULL)
 ){
   print_to_terminal_wrapped(0, 14);
-  static const sqlite3_io_methods demoio = {
+  static const sqlite3_io_methods uqbario = {
     1,                            // iVersion
-    demoClose,                    // xClose
-    demoRead,                     // xRead
-    demoWrite,                    // xWrite
-    demoTruncate,                 // xTruncate
-    demoSync,                     // xSync
-    demoFileSize,                 // xFileSize
-    demoLock,                     // xLock
-    demoUnlock,                   // xUnlock
-    demoCheckReservedLock,        // xCheckReservedLock
-    demoFileControl,              // xFileControl
-    demoSectorSize,               // xSectorSize
-    demoDeviceCharacteristics     // xDeviceCharacteristics
+    uqbarClose,                    // xClose
+    uqbarRead,                     // xRead
+    uqbarWrite,                    // xWrite
+    uqbarTruncate,                 // xTruncate
+    uqbarSync,                     // xSync
+    uqbarFileSize,                 // xFileSize
+    uqbarLock,                     // xLock
+    uqbarUnlock,                   // xUnlock
+    uqbarCheckReservedLock,        // xCheckReservedLock
+    uqbarFileControl,              // xFileControl
+    uqbarSectorSize,               // xSectorSize
+    uqbarDeviceCharacteristics     // xDeviceCharacteristics
   };
 
   DemoFile *p = (DemoFile*)pFile;  // Populate this structure
@@ -804,7 +804,7 @@ static int demoOpen(
     &response
   );
 
-  p->base.pMethods = &demoio;
+  p->base.pMethods = &uqbario;
   return SQLITE_OK;
 }
 
@@ -812,7 +812,7 @@ static int demoOpen(
 // is non-zero, then ensure the file-system modification to delete the
 // file has been synced to disk before returning.
 // TODO: does this work as noop?
-static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
+static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
   print_to_terminal_wrapped(0, 15);
     return SQLITE_OK;
 }
@@ -829,7 +829,7 @@ static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
 
 // Query the file-system to see if the named file exists, is readable or
 // is both readable and writable.
-static int demoAccess(
+static int uqbarAccess(
   sqlite3_vfs *pVfs,
   const char *zPath,
   int flags,
@@ -850,7 +850,7 @@ static int demoAccess(
 //
 //   1. Path components are separated by a '/'. and
 //   2. Full paths begin with a '/' character.
-static int demoFullPathname(
+static int uqbarFullPathname(
   sqlite3_vfs *pVfs,              // VFS
   const char *zPath,              // Input path (possibly a relative path)
   int nPathOut,                   // Size of output buffer in bytes
@@ -873,34 +873,34 @@ static int demoFullPathname(
 // are supposed to implement the functionality needed by SQLite to load
 // extensions compiled as shared objects. This simple VFS does not support
 // this functionality, so the following functions are no-ops.
-static void *demoDlOpen(sqlite3_vfs *pVfs, const char *zPath){
+static void *uqbarDlOpen(sqlite3_vfs *pVfs, const char *zPath){
   print_to_terminal_wrapped(0, 18);
   return 0;
 }
-static void demoDlError(sqlite3_vfs *pVfs, int nByte, char *zErrMsg){
+static void uqbarDlError(sqlite3_vfs *pVfs, int nByte, char *zErrMsg){
   print_to_terminal_wrapped(0, 19);
   sqlite3_snprintf(nByte, zErrMsg, "Loadable extensions are not supported");
   zErrMsg[nByte-1] = '\0';
 }
-static void (*demoDlSym(sqlite3_vfs *pVfs, void *pH, const char *z))(void){
+static void (*uqbarDlSym(sqlite3_vfs *pVfs, void *pH, const char *z))(void){
   print_to_terminal_wrapped(0, 20);
   return 0;
 }
-static void demoDlClose(sqlite3_vfs *pVfs, void *pHandle){
+static void uqbarDlClose(sqlite3_vfs *pVfs, void *pHandle){
   print_to_terminal_wrapped(0, 21);
   return;
 }
 
 // Parameter zByte points to a buffer nByte bytes in size. Populate this
 // buffer with pseudo-random data.
-static int demoRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
+static int uqbarRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
   print_to_terminal_wrapped(0, 22);
   return SQLITE_OK;
 }
 
 // Sleep for at least nMicro microseconds. Return the (approximate) number
 // of microseconds slept for.
-static int demoSleep(sqlite3_vfs *pVfs, int nMicro){
+static int uqbarSleep(sqlite3_vfs *pVfs, int nMicro){
   print_to_terminal_wrapped(0, 23);
   sleep(nMicro / 1000000);
   usleep(nMicro % 1000000);
@@ -916,7 +916,7 @@ static int demoSleep(sqlite3_vfs *pVfs, int nMicro){
 // an integer number of seconds. Also, assuming time_t is a signed 32-bit
 // value, it will stop working some time in the year 2038 AD (the so-called
 // "year 2038" problem that afflicts systems that store time this way).
-static int demoCurrentTime(sqlite3_vfs *pVfs, double *pTime){
+static int uqbarCurrentTime(sqlite3_vfs *pVfs, double *pTime){
   print_to_terminal_wrapped(0, 24);
   time_t t = time(0);
   *pTime = t/86400.0 + 2440587.5;
@@ -926,29 +926,29 @@ static int demoCurrentTime(sqlite3_vfs *pVfs, double *pTime){
 // This function returns a pointer to the VFS implemented in this file.
 // To make the VFS available to SQLite:
 //
-//   sqlite3_vfs_register(sqlite3_demovfs(), 0);
-sqlite3_vfs *sqlite3_demovfs(void){
+//   sqlite3_vfs_register(sqlite3_uqbarvfs(), 0);
+sqlite3_vfs *sqlite3_uqbarvfs(void){
   print_to_terminal_wrapped(0, 25);
-  static sqlite3_vfs demovfs = {
+  static sqlite3_vfs uqbarvfs = {
     1,                            // iVersion
     sizeof(DemoFile),             // szOsFile
     MAXPATHNAME,                  // mxPathname
     0,                            // pNext
-    "demo",                       // zName
+    "uqbar",                      // zName
     0,                            // pAppData
-    demoOpen,                     // xOpen
-    demoDelete,                   // xDelete
-    demoAccess,                   // xAccess
-    demoFullPathname,             // xFullPathname
-    demoDlOpen,                   // xDlOpen
-    demoDlError,                  // xDlError
-    demoDlSym,                    // xDlSym
-    demoDlClose,                  // xDlClose
-    demoRandomness,               // xRandomness
-    demoSleep,                    // xSleep
-    demoCurrentTime,              // xCurrentTime
+    uqbarOpen,                    // xOpen
+    uqbarDelete,                  // xDelete
+    uqbarAccess,                  // xAccess
+    uqbarFullPathname,            // xFullPathname
+    uqbarDlOpen,                  // xDlOpen
+    uqbarDlError,                 // xDlError
+    uqbarDlSym,                   // xDlSym
+    uqbarDlClose,                 // xDlClose
+    uqbarRandomness,              // xRandomness
+    uqbarSleep,                   // xSleep
+    uqbarCurrentTime,             // xCurrentTime
   };
-  return &demovfs;
+  return &uqbarvfs;
 }
 
 #endif // !defined(SQLITE_TEST) || SQLITE_OS_UNIX
@@ -966,42 +966,42 @@ sqlite3_vfs *sqlite3_demovfs(void){
 #endif
 
 #if SQLITE_OS_UNIX
-static int SQLITE_TCLAPI register_demovfs(
+static int SQLITE_TCLAPI register_uqbarvfs(
   ClientData clientData, // Pointer to sqlite3_enable_XXX function
   Tcl_Interp *interp,    // The TCL interpreter that invoked this command
   int objc,              // Number of arguments
   Tcl_Obj *CONST objv[]  // Command arguments
 ){
-  sqlite3_vfs_register(sqlite3_demovfs(), 1);
+  sqlite3_vfs_register(sqlite3_uqbarvfs(), 1);
   return TCL_OK;
 }
-static int SQLITE_TCLAPI unregister_demovfs(
+static int SQLITE_TCLAPI unregister_uqbarvfs(
   ClientData clientData, // Pointer to sqlite3_enable_XXX function
   Tcl_Interp *interp,    // The TCL interpreter that invoked this command
   int objc,              // Number of arguments
   Tcl_Obj *CONST objv[]  // Command arguments
 ){
-  sqlite3_vfs_unregister(sqlite3_demovfs());
+  sqlite3_vfs_unregister(sqlite3_uqbarvfs());
   return TCL_OK;
 }
 
 // Register commands with the TCL interpreter.
-int Sqlitetest_demovfs_Init(Tcl_Interp *interp){
-  Tcl_CreateObjCommand(interp, "register_demovfs", register_demovfs, 0, 0);
-  Tcl_CreateObjCommand(interp, "unregister_demovfs", unregister_demovfs, 0, 0);
+int Sqlitetest_uqbarvfs_Init(Tcl_Interp *interp){
+  Tcl_CreateObjCommand(interp, "register_uqbarvfs", register_uqbarvfs, 0, 0);
+  Tcl_CreateObjCommand(interp, "unregister_uqbarvfs", unregister_uqbarvfs, 0, 0);
   return TCL_OK;
 }
 
 #else
-int Sqlitetest_demovfs_Init(Tcl_Interp *interp){ return TCL_OK; }
+int Sqlitetest_uqbarvfs_Init(Tcl_Interp *interp){ return TCL_OK; }
 #endif
 
 #endif // SQLITE_TEST
 
-// Register sqlite3_demovfs
+// Register sqlite3_uqbarvfs
 int sqlite3_os_init()
 {
-    sqlite3_vfs_register(sqlite3_demovfs(), 0);
+    sqlite3_vfs_register(sqlite3_uqbarvfs(), 0);
     return 0;
 }
 
