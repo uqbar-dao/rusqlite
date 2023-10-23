@@ -331,8 +331,6 @@ static int uqbarFlushBuffer(DemoFile *p){
 }
 
 // Close a file.
-// TODO: required, or is noop acceptable?
-// TODO: free OurNode, Identifier, Name, Buffer
 static int uqbarClose(sqlite3_file *pFile){
   print_to_terminal_wrapped(0, 2);
   int rc;
@@ -447,11 +445,7 @@ static int uqbarRead(
       .is_empty = 0,
       .string = mime_string,
   };
-  // unsigned char bytes_data[iAmt];
-  // void *bytes_data = malloc(sizeof(unsigned char) * iAmt);
   Bytes bytes = {
-      // .data = bytes_data,
-      // .data = &bytes_data,
       .data = zBuf,
       .len = iAmt,
   };
@@ -683,7 +677,7 @@ static int uqbarOpen(
 ){
   print_to_terminal_wrapped(0, 14);
   static const sqlite3_io_methods uqbario = {
-    1,                            // iVersion
+    1,                             // iVersion
     uqbarClose,                    // xClose
     uqbarRead,                     // xRead
     uqbarWrite,                    // xWrite
