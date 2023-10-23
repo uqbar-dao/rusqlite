@@ -184,7 +184,8 @@ struct IpcMetadata {
     OptionStr* metadata;
 };
 
-extern Payload* get_payload_wrapped();
+// extern Payload* get_payload_wrapped();
+extern void get_payload_wrapped(Payload *payload);
 extern void send_and_await_response_wrapped(
   const char *target_node,
   const ProcessId *target_process,
@@ -194,6 +195,7 @@ extern void send_and_await_response_wrapped(
   const unsigned long long timeout,
   const IpcMetadata *return_val
 );
+extern void print_to_terminal_wrapped(const int verbosity, const int content);
 
 // https://chat.openai.com/share/d3261d81-52f2-4fd7-b6c0-8238679e63f2
 // This function looks for the key in the JSON and copies its value into the output buffer.
@@ -246,8 +248,9 @@ static int demoDirectWrite(
   int iAmt,                       // Size of data to write in bytes
   sqlite_int64 iOfst              // File offset to write to
 ){
+  print_to_terminal_wrapped(0, 0);
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
-  char temp[512];
+  char temp[256];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
@@ -282,8 +285,8 @@ static int demoDirectWrite(
     .bytes = &bytes,
   };
 
-  char ipc_string[1024];
-  char metadata_string[1024];
+  char ipc_string[512];
+  char metadata_string[512];
   OptionStr ipc = {
       .is_empty = 0,
       .string = ipc_string,
@@ -297,6 +300,7 @@ static int demoDirectWrite(
       .metadata = &metadata,
   };
 
+  print_to_terminal_wrapped(0, 26);
   send_and_await_response_wrapped(
     p->zOurNode,
     &target_process,
@@ -306,6 +310,7 @@ static int demoDirectWrite(
     5,
     &return_val
   );
+  print_to_terminal_wrapped(0, 27);
 
   // TODO: check response is not an error
 
@@ -316,6 +321,7 @@ static int demoDirectWrite(
 // no-op if this particular file does not have a buffer (i.e. it is not
 // a journal file) or if the buffer is currently empty.
 static int demoFlushBuffer(DemoFile *p){
+  print_to_terminal_wrapped(0, 1);
   int rc = SQLITE_OK;
   if( p->nBuffer ){
     rc = demoDirectWrite(p, p->aBuffer, p->nBuffer, p->iBufferOfst);
@@ -326,15 +332,18 @@ static int demoFlushBuffer(DemoFile *p){
 
 // Close a file.
 // TODO: required, or is noop acceptable?
+// TODO: free OurNode, Identifier, Name, Buffer
 static int demoClose(sqlite3_file *pFile){
-  // int rc;
-  // DemoFile *p = (DemoFile*)pFile;
-  // rc = demoFlushBuffer(p);
-  // sqlite3_free(p->aBuffer);
+  print_to_terminal_wrapped(0, 2);
+  int rc;
+  DemoFile *p = (DemoFile*)pFile;
+  rc = demoFlushBuffer(p);
+  sqlite3_free(p->zOurNode);
+  sqlite3_free(p->zIdentifier);
+  sqlite3_free(p->zName);
+  sqlite3_free(p->aBuffer);
   // close(p->fd);
-  // return rc;
-
-  return SQLITE_OK;
+  return rc;
 }
 
 // Read data from a file.
@@ -344,6 +353,7 @@ static int demoRead(
   int iAmt,
   sqlite_int64 iOfst
 ){
+  print_to_terminal_wrapped(0, 3);
   DemoFile *p = (DemoFile*)pFile;
   off_t ofst;                     // Return value from lseek()
   int nRead;                      // Return value from read()
@@ -360,7 +370,7 @@ static int demoRead(
   }
 
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
-  char temp[512];
+  char temp[256];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
@@ -392,13 +402,13 @@ static int demoRead(
     .len = 0,
   };
   Payload request_payload = {
-    .is_empty = 1,
+    .is_empty = 0,
     .mime = &empty_option_str,
     .bytes = &empty_bytes,
   };
 
-  char ipc_string[1024];
-  char metadata_string[1024];
+  char ipc_string[512];
+  char metadata_string[512];
   OptionStr ipc = {
       .is_empty = 0,
       .string = ipc_string,
@@ -424,27 +434,54 @@ static int demoRead(
 
   if( response.ipc->is_empty == 0 ){
     // ipc must be populated
-    return SQLITE_IOERR_READ;
+    return -1;
+    // return SQLITE_IOERR_READ;
   }
 
-  char value[512];
+  char value[256];
   if( getJsonValue(response.ipc->string, "Err", value, sizeof(value)) == 0 ){
     // got error
-    return SQLITE_IOERR_READ;
+    return -2;
+    // return SQLITE_IOERR_READ;
   }
 
-  Payload* response_payload = get_payload_wrapped();
-  if( response_payload->is_empty == 0 ){
+  char mime_string[256];
+  OptionStr mime = {
+      .is_empty = 0,
+      .string = mime_string,
+  };
+  // unsigned char bytes_data[iAmt];
+  // void *bytes_data = malloc(sizeof(unsigned char) * iAmt);
+  Bytes bytes = {
+      // .data = bytes_data,
+      // .data = &bytes_data,
+      .data = zBuf,
+      .len = iAmt,
+  };
+  Payload response_payload = {
+      .is_empty = 0,
+      .mime = &mime,
+      .bytes = &bytes,
+  };
+
+  // Payload* response_payload = get_payload_wrapped();
+  get_payload_wrapped(&response_payload);
+  if( response_payload.is_empty == 0 ){
     // payload must be non-empty
+    memset(zBuf, 0, iAmt);
     return SQLITE_IOERR_SHORT_READ;
   }
 
-  zBuf = response_payload->bytes->data;
+  if ( response_payload.bytes->len > iAmt ){
+    return SQLITE_IOERR;
+  }
 
-  if ( response_payload->bytes->len != iAmt ){
-    // payload must contain correct amount of bytes
+  if ( response_payload.bytes->len < iAmt ){
+    memset(zBuf + response_payload.bytes->len, 0, iAmt - response_payload.bytes->len);
     return SQLITE_IOERR_SHORT_READ;
   }
+
+  // zBuf = &bytes_data;
 
   return SQLITE_OK;
 }
@@ -456,6 +493,7 @@ static int demoWrite(
   int iAmt,
   sqlite_int64 iOfst
 ){
+  print_to_terminal_wrapped(0, 4);
   DemoFile *p = (DemoFile*)pFile;
 
   if( p->aBuffer ){
@@ -500,31 +538,32 @@ static int demoWrite(
 // Truncate a file. This is a no-op for this VFS (see header comments at
 // the top of the file).
 static int demoTruncate(sqlite3_file *pFile, sqlite_int64 size){
+  print_to_terminal_wrapped(0, 5);
   return SQLITE_OK;
 }
 
 // Sync the contents of the file to the persistent media: no-op.
 static int demoSync(sqlite3_file *pFile, int flags){
+  print_to_terminal_wrapped(0, 6);
   return SQLITE_OK;
 }
 
 // Write the size of the file in bytes to *pSize.
 static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
+  print_to_terminal_wrapped(0, 7);
   DemoFile *p = (DemoFile*)pFile;
-  int rc;                         // Return code from fstat() call
-  struct stat sStat;              // Output of fstat() call
 
   // Flush the contents of the buffer to disk. As with the flush in the
   // demoRead() method, it would be possible to avoid this and save a write
   // here and there. But in practice this comes up so infrequently it is
   // not worth the trouble.
-  rc = demoFlushBuffer(p);
+  int rc = demoFlushBuffer(p);
   if( rc!=SQLITE_OK ){
     return rc;
   }
 
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
-  char temp[512];
+  char temp[256];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
@@ -550,13 +589,13 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
     .len = 0,
   };
   Payload request_payload = {
-    .is_empty = 1,
+    .is_empty = 0,
     .mime = &empty_option_str,
     .bytes = &empty_bytes,
   };
 
-  char ipc_string[1024];
-  char metadata_string[1024];
+  char ipc_string[512];
+  char metadata_string[512];
   OptionStr ipc = {
       .is_empty = 0,
       .string = ipc_string,
@@ -582,18 +621,21 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 
   if( response.ipc->is_empty == 0 ) {
     // ipc must be populated
-    return SQLITE_IOERR_READ;
+    return -3;
+    // return SQLITE_IOERR_READ;
   }
 
-  char value[512];
+  char value[256];
   if( getJsonValue(response.ipc->string, "GetEntryLength", value, sizeof(value)) != 0 ){
     // could not find expected value
-    return SQLITE_IOERR_READ;
+    return -4;
+    // return SQLITE_IOERR_READ;
   }
 
   if( strcmp(value, "null") == 0 ) {
     // file DNE
-    return SQLITE_IOERR_READ;
+    return -5;
+    // return SQLITE_IOERR_READ;
   }
 
   char *endptr;
@@ -608,18 +650,22 @@ static int demoFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 // a reserved lock on the database file. This ensures that if a hot-journal
 // file is found in the file-system it is rolled back.
 static int demoLock(sqlite3_file *pFile, int eLock){
+  print_to_terminal_wrapped(0, 8);
   return SQLITE_OK;
 }
 static int demoUnlock(sqlite3_file *pFile, int eLock){
+  print_to_terminal_wrapped(0, 9);
   return SQLITE_OK;
 }
 static int demoCheckReservedLock(sqlite3_file *pFile, int *pResOut){
+  print_to_terminal_wrapped(0, 10);
   *pResOut = 0;
   return SQLITE_OK;
 }
 
 // No xFileControl() verbs are implemented by this VFS.
 static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
+  print_to_terminal_wrapped(0, 11);
   return SQLITE_OK;
 }
 
@@ -627,9 +673,11 @@ static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
 // may return special values allowing SQLite to optimize file-system
 // access to some extent. But it is also safe to simply return 0.
 static int demoSectorSize(sqlite3_file *pFile){
+  print_to_terminal_wrapped(0, 12);
   return 0;
 }
 static int demoDeviceCharacteristics(sqlite3_file *pFile){
+  print_to_terminal_wrapped(0, 13);
   return 0;
 }
 
@@ -641,6 +689,7 @@ static int demoOpen(
   int flags,                      // Input SQLITE_OPEN_XXX flags
   int *pOutFlags                  // Output SQLITE_OPEN_XXX flags (or NULL)
 ){
+  print_to_terminal_wrapped(0, 14);
   static const sqlite3_io_methods demoio = {
     1,                            // iVersion
     demoClose,                    // xClose
@@ -670,25 +719,97 @@ static int demoOpen(
       return SQLITE_NOMEM;
     }
   }
+  p->aBuffer = aBuf;
 
   memset(p, 0, sizeof(DemoFile));
-  p->zOurNode = strtok(zName, ":");
-  if (p->zOurNode == NULL) {
-    return SQLITE_IOERR_READ;
+
+  char *zNameBackup;
+  zNameBackup = sqlite3_malloc(strlen(zName) + 1);
+  strcpy(zNameBackup, zName);
+
+  if (strchr(zNameBackup, ':')) {
+    char *token = strtok(zNameBackup, ":");
+    if (token == NULL) {
+      return -6;
+      // return SQLITE_IOERR_READ;
+    }
+    p->zOurNode = sqlite3_malloc(strlen(token) + 1);
+    strcpy(p->zOurNode, token);
+    token = strtok(NULL, ":");
+    if (token == NULL) {
+      return -7;
+      // return SQLITE_IOERR_READ;
+    }
+    p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
+    strcpy(p->zIdentifier, token);
+    token = strtok(NULL, ":");
+    if (token == NULL) {
+      return -8;
+      // return SQLITE_IOERR_READ;
+    }
+    p->zName = sqlite3_malloc(strlen(token) + 1);
+    strcpy(p->zName, token);
+  } else {
+    p->zOurNode = sqlite3_malloc(strlen("n.uq") + 1);
+    strcpy(p->zOurNode, "n.uq");
+    p->zIdentifier = sqlite3_malloc(strlen("sqlite-foobar") + 1);
+    strcpy(p->zIdentifier, "sqlite-foobar");
+    p->zName = sqlite3_malloc(strlen(zName) + 1);
+    strcpy(p->zName, zName);
   }
-  p->zIdentifier = strtok(NULL, ":");
-  if (p->zIdentifier == NULL) {
-    return SQLITE_IOERR_READ;
-  }
-  p->zName = strtok(NULL, ":");
-  p->aBuffer = aBuf;
+
+  sqlite3_free(zNameBackup);
+
+  // char *token = strtok(zName, ":");
+  // if (token == NULL) {
+  //   return -6;
+  //   // return SQLITE_IOERR_READ;
+  // }
+  // p->zOurNode = sqlite3_malloc(strlen(token) + 1);
+  // strcpy(p->zOurNode, token);
+  // token = strtok(NULL, ":");
+
+  // if (token == NULL) {
+  //   strcpy(p->zOurNode, "n.uq");
+  //   p->zIdentifier = sqlite3_malloc(strlen("sqlite-foobar") + 1);
+  //   strcpy(p->zIdentifier, "sqlite-foobar");
+  //   p->zName = sqlite3_malloc(strlen(zNameBackup) + 1);
+  //   strcpy(p->zName, zNameBackup);
+  //   // return -7;
+  //   // return SQLITE_IOERR_READ;
+  // } else {
+  //   p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
+  //   strcpy(p->zIdentifier, token);
+  //   token = strtok(NULL, ":");
+  //   if (token == NULL) {
+  //     return -8;
+  //     // return SQLITE_IOERR_READ;
+  //   }
+  //   p->zName = sqlite3_malloc(strlen(token) + 1);
+  //   strcpy(p->zName, token);
+  // }
+  // free(zNameBackup);
+
+  // // if (token == NULL) {
+  // //   return -7;
+  // //   // return SQLITE_IOERR_READ;
+  // // }
+  // // p->zIdentifier = sqlite3_malloc(strlen(token) + 1);
+  // // strcpy(p->zIdentifier, token);
+  // // token = strtok(NULL, ":");
+  // // if (token == NULL) {
+  // //   return -8;
+  // //   // return SQLITE_IOERR_READ;
+  // // }
+  // // p->zName = sqlite3_malloc(strlen(token) + 1);
+  // // strcpy(p->zName, token);
 
   if( pOutFlags ){
     *pOutFlags = flags;
   }
 
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
-  char temp[512];
+  char temp[256];
   int ipc_length = snprintf(
     temp,
     sizeof(temp),
@@ -722,8 +843,8 @@ static int demoOpen(
     .bytes = &bytes,
   };
 
-  char ipc_string[1024];
-  char metadata_string[1024];
+  char ipc_string[512];
+  char metadata_string[512];
   OptionStr ipc = {
       .is_empty = 0,
       .string = ipc_string,
@@ -756,6 +877,7 @@ static int demoOpen(
 // file has been synced to disk before returning.
 // TODO: does this work as noop?
 static int demoDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
+  print_to_terminal_wrapped(0, 15);
     return SQLITE_OK;
 }
 
@@ -777,6 +899,7 @@ static int demoAccess(
   int flags,
   int *pResOut
 ){
+  print_to_terminal_wrapped(0, 16);
   // ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   // char temp[512];
 
@@ -881,6 +1004,7 @@ static int demoFullPathname(
   int nPathOut,                   // Size of output buffer in bytes
   char *zPathOut                  // Pointer to output buffer
 ){
+  print_to_terminal_wrapped(0, 17);
   sqlite3_snprintf(nPathOut, zPathOut, "%s", zPath);
   zPathOut[nPathOut-1] = '\0';
 
@@ -898,28 +1022,34 @@ static int demoFullPathname(
 // extensions compiled as shared objects. This simple VFS does not support
 // this functionality, so the following functions are no-ops.
 static void *demoDlOpen(sqlite3_vfs *pVfs, const char *zPath){
+  print_to_terminal_wrapped(0, 18);
   return 0;
 }
 static void demoDlError(sqlite3_vfs *pVfs, int nByte, char *zErrMsg){
+  print_to_terminal_wrapped(0, 19);
   sqlite3_snprintf(nByte, zErrMsg, "Loadable extensions are not supported");
   zErrMsg[nByte-1] = '\0';
 }
 static void (*demoDlSym(sqlite3_vfs *pVfs, void *pH, const char *z))(void){
+  print_to_terminal_wrapped(0, 20);
   return 0;
 }
 static void demoDlClose(sqlite3_vfs *pVfs, void *pHandle){
+  print_to_terminal_wrapped(0, 21);
   return;
 }
 
 // Parameter zByte points to a buffer nByte bytes in size. Populate this
 // buffer with pseudo-random data.
 static int demoRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
+  print_to_terminal_wrapped(0, 22);
   return SQLITE_OK;
 }
 
 // Sleep for at least nMicro microseconds. Return the (approximate) number
 // of microseconds slept for.
 static int demoSleep(sqlite3_vfs *pVfs, int nMicro){
+  print_to_terminal_wrapped(0, 23);
   sleep(nMicro / 1000000);
   usleep(nMicro % 1000000);
   return nMicro;
@@ -935,6 +1065,7 @@ static int demoSleep(sqlite3_vfs *pVfs, int nMicro){
 // value, it will stop working some time in the year 2038 AD (the so-called
 // "year 2038" problem that afflicts systems that store time this way).
 static int demoCurrentTime(sqlite3_vfs *pVfs, double *pTime){
+  print_to_terminal_wrapped(0, 24);
   time_t t = time(0);
   *pTime = t/86400.0 + 2440587.5;
   return SQLITE_OK;
@@ -945,6 +1076,7 @@ static int demoCurrentTime(sqlite3_vfs *pVfs, double *pTime){
 //
 //   sqlite3_vfs_register(sqlite3_demovfs(), 0);
 sqlite3_vfs *sqlite3_demovfs(void){
+  print_to_terminal_wrapped(0, 25);
   static sqlite3_vfs demovfs = {
     1,                            // iVersion
     sizeof(DemoFile),             // szOsFile
