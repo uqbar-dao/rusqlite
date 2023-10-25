@@ -139,9 +139,9 @@
 #define MAXPATHNAME 512
 
 // When using this VFS, the sqlite3_file* handles that SQLite uses are
-// actually pointers to instances of type DemoFile.
-typedef struct DemoFile DemoFile;
-struct DemoFile {
+// actually pointers to instances of type UqbarFile.
+typedef struct UqbarFile UqbarFile;
+struct UqbarFile {
   sqlite3_file base;              // Base class. Must be first.
   char *zOurNode;
   char *zIdentifier;
@@ -241,9 +241,9 @@ int getJsonValue(const char *json, const char *key, char *output, int outputSize
 }
 
 // Write directly to the file passed as the first argument. Even if the
-// file has a write-buffer (DemoFile.aBuffer), ignore it.
+// file has a write-buffer (UqbarFile.aBuffer), ignore it.
 static int uqbarDirectWrite(
-  DemoFile *p,                    // File handle
+  UqbarFile *p,                    // File handle
   const void *zBuf,               // Buffer containing data to write
   int iAmt,                       // Size of data to write in bytes
   sqlite_int64 iOfst              // File offset to write to
@@ -251,7 +251,7 @@ static int uqbarDirectWrite(
   print_to_terminal_wrapped(0, 0);
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[256];
-  int ipc_length = snprintf(
+  snprintf(
     temp,
     sizeof(temp),
     "{"
@@ -317,10 +317,10 @@ static int uqbarDirectWrite(
   return SQLITE_OK;
 }
 
-// Flush the contents of the DemoFile.aBuffer buffer to disk. This is a
+// Flush the contents of the UqbarFile.aBuffer buffer to disk. This is a
 // no-op if this particular file does not have a buffer (i.e. it is not
 // a journal file) or if the buffer is currently empty.
-static int uqbarFlushBuffer(DemoFile *p){
+static int uqbarFlushBuffer(UqbarFile *p){
   print_to_terminal_wrapped(0, 1);
   int rc = SQLITE_OK;
   if( p->nBuffer ){
@@ -334,7 +334,7 @@ static int uqbarFlushBuffer(DemoFile *p){
 static int uqbarClose(sqlite3_file *pFile){
   print_to_terminal_wrapped(0, 2);
   int rc;
-  DemoFile *p = (DemoFile*)pFile;
+  UqbarFile *p = (UqbarFile*)pFile;
   rc = uqbarFlushBuffer(p);
   sqlite3_free(p->zOurNode);
   sqlite3_free(p->zIdentifier);
@@ -351,7 +351,7 @@ static int uqbarRead(
   sqlite_int64 iOfst
 ){
   print_to_terminal_wrapped(0, 3);
-  DemoFile *p = (DemoFile*)pFile;
+  UqbarFile *p = (UqbarFile*)pFile;
   off_t ofst;                     // Return value from lseek()
   int nRead;                      // Return value from read()
   int rc;                         // Return code from uqbarFlushBuffer()
@@ -368,7 +368,7 @@ static int uqbarRead(
 
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[256];
-  int ipc_length = snprintf(
+  snprintf(
     temp,
     sizeof(temp),
     "{"
@@ -455,7 +455,6 @@ static int uqbarRead(
       .bytes = &bytes,
   };
 
-  // Payload* response_payload = get_payload_wrapped();
   get_payload_wrapped(&response_payload);
   if( response_payload.is_empty == 0 ){
     // payload must be non-empty
@@ -464,7 +463,7 @@ static int uqbarRead(
   }
 
   if ( response_payload.bytes->len > iAmt ){
-    return SQLITE_IOERR;
+    return SQLITE_IOERR_READ;
   }
 
   if ( response_payload.bytes->len < iAmt ){
@@ -483,7 +482,7 @@ static int uqbarWrite(
   sqlite_int64 iOfst
 ){
   print_to_terminal_wrapped(0, 4);
-  DemoFile *p = (DemoFile*)pFile;
+  UqbarFile *p = (UqbarFile*)pFile;
 
   if( p->aBuffer ){
     char *z = (char *)zBuf;       // Pointer to remaining data to write
@@ -540,7 +539,7 @@ static int uqbarSync(sqlite3_file *pFile, int flags){
 // Write the size of the file in bytes to *pSize.
 static int uqbarFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
   print_to_terminal_wrapped(0, 7);
-  DemoFile *p = (DemoFile*)pFile;
+  UqbarFile *p = (UqbarFile*)pFile;
 
   // Flush the contents of the buffer to disk. As with the flush in the
   // uqbarRead() method, it would be possible to avoid this and save a write
@@ -553,7 +552,7 @@ static int uqbarFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[256];
-  int ipc_length = snprintf(
+  snprintf(
     temp,
     sizeof(temp),
     "{"
@@ -671,7 +670,7 @@ static int uqbarDeviceCharacteristics(sqlite3_file *pFile){
 static int uqbarOpen(
   sqlite3_vfs *pVfs,              // VFS
   const char *zName,              // File to open, or 0 for a temp file
-  sqlite3_file *pFile,            // Pointer to DemoFile struct to populate
+  sqlite3_file *pFile,            // Pointer to UqbarFile struct to populate
   int flags,                      // Input SQLITE_OPEN_XXX flags
   int *pOutFlags                  // Output SQLITE_OPEN_XXX flags (or NULL)
 ){
@@ -692,7 +691,7 @@ static int uqbarOpen(
     uqbarDeviceCharacteristics     // xDeviceCharacteristics
   };
 
-  DemoFile *p = (DemoFile*)pFile;  // Populate this structure
+  UqbarFile *p = (UqbarFile*)pFile;  // Populate this structure
   char *aBuf = 0;
 
   if( zName==0 ){
@@ -707,7 +706,9 @@ static int uqbarOpen(
   }
   p->aBuffer = aBuf;
 
-  memset(p, 0, sizeof(DemoFile));
+  memset(p, 0, sizeof(UqbarFile));
+
+  p->base.pMethods = &uqbario;
 
   char *zNameBackup;
   zNameBackup = sqlite3_malloc(strlen(zName) + 1);
@@ -738,9 +739,78 @@ static int uqbarOpen(
     *pOutFlags = flags;
   }
 
+  // check if file exists
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
+  char file_exists_request_ipc_string[256];
+  snprintf(
+    file_exists_request_ipc_string,
+    sizeof(file_exists_request_ipc_string),
+    "{"
+      "\"drive\": \"%s\","
+      "\"action\": {"
+        "\"GetHash\": \"%s\""
+      "}"
+    "}",
+    p->zIdentifier,
+    p->zName
+  );
+  OptionStr file_exists_request_ipc = {
+    .is_empty = 1,
+    .string = file_exists_request_ipc_string,
+  };
+  OptionStr empty_option_str = {
+    .is_empty = 0,
+    .string = "",
+  };
+  Bytes bytes = {
+    .data = "",
+    .len = 0,
+  };
+  Payload payload = {
+    .is_empty = 1,
+    .mime = &empty_option_str,
+    .bytes = &bytes,
+  };
+
+  char file_exists_response_ipc_string[512];
+  char file_exists_response_metadata_string[512];
+  OptionStr file_exists_response_ipc = {
+      .is_empty = 0,
+      .string = file_exists_response_ipc_string,
+  };
+  OptionStr file_exists_response_metadata = {
+      .is_empty = 0,
+      .string = file_exists_response_metadata_string,
+  };
+  IpcMetadata file_exists_response = {
+      .ipc = &file_exists_response_ipc,
+      .metadata = &file_exists_response_metadata,
+  };
+
+  send_and_await_response_wrapped(
+    p->zOurNode,
+    &target_process,
+    &file_exists_request_ipc,
+    &empty_option_str,
+    &payload,
+    5,
+    &file_exists_response
+  );
+
+  if( file_exists_response.ipc->is_empty != 0 ){
+    char value[256];
+    if( getJsonValue(file_exists_response.ipc->string, "GetHash", value, sizeof(value)) == 0 ){
+      // already exists
+      print_to_terminal_wrapped(0, 28);
+      return SQLITE_OK;
+    }
+  }
+
+  print_to_terminal_wrapped(0, 29);
+
+  // if file does not exist, create it
   char temp[256];
-  int ipc_length = snprintf(
+  snprintf(
     temp,
     sizeof(temp),
     "{"
@@ -758,19 +828,6 @@ static int uqbarOpen(
   OptionStr request_ipc = {
     .is_empty = 1,
     .string = temp,
-  };
-  OptionStr empty_option_str = {
-    .is_empty = 0,
-    .string = "",
-  };
-  Bytes bytes = {
-    .data = "",
-    .len = 0,
-  };
-  Payload payload = {
-    .is_empty = 1,
-    .mime = &empty_option_str,
-    .bytes = &bytes,
   };
 
   char ipc_string[512];
@@ -798,7 +855,6 @@ static int uqbarOpen(
     &response
   );
 
-  p->base.pMethods = &uqbario;
   return SQLITE_OK;
 }
 
@@ -823,6 +879,8 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
 
 // Query the file-system to see if the named file exists, is readable or
 // is both readable and writable.
+// We run this as "always accessible" because we don't have access to the
+// sqlite3_file node & identifier.
 static int uqbarAccess(
   sqlite3_vfs *pVfs,
   const char *zPath,
@@ -925,7 +983,7 @@ sqlite3_vfs *sqlite3_uqbarvfs(void){
   print_to_terminal_wrapped(0, 25);
   static sqlite3_vfs uqbarvfs = {
     1,                            // iVersion
-    sizeof(DemoFile),             // szOsFile
+    sizeof(UqbarFile),            // szOsFile
     MAXPATHNAME,                  // mxPathname
     0,                            // pNext
     "uqbar",                      // zName
