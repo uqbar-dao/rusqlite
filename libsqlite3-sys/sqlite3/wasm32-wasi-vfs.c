@@ -195,7 +195,6 @@ extern void send_and_await_response_wrapped(
   const unsigned long long timeout,
   const IpcMetadata *return_val
 );
-extern void print_to_terminal_wrapped(const int verbosity, const int content);
 
 // https://chat.openai.com/share/d3261d81-52f2-4fd7-b6c0-8238679e63f2
 // This function looks for the key in the JSON and copies its value into the output buffer.
@@ -248,7 +247,6 @@ static int uqbarDirectWrite(
   int iAmt,                       // Size of data to write in bytes
   sqlite_int64 iOfst              // File offset to write to
 ){
-  print_to_terminal_wrapped(0, 0);
   ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
   char temp[256];
   snprintf(
@@ -300,7 +298,6 @@ static int uqbarDirectWrite(
       .metadata = &metadata,
   };
 
-  print_to_terminal_wrapped(0, 26);
   send_and_await_response_wrapped(
     p->zOurNode,
     &target_process,
@@ -310,7 +307,6 @@ static int uqbarDirectWrite(
     5,
     &return_val
   );
-  print_to_terminal_wrapped(0, 27);
 
   // TODO: check response is not an error
 
@@ -321,7 +317,6 @@ static int uqbarDirectWrite(
 // no-op if this particular file does not have a buffer (i.e. it is not
 // a journal file) or if the buffer is currently empty.
 static int uqbarFlushBuffer(UqbarFile *p){
-  print_to_terminal_wrapped(0, 1);
   int rc = SQLITE_OK;
   if( p->nBuffer ){
     rc = uqbarDirectWrite(p, p->aBuffer, p->nBuffer, p->iBufferOfst);
@@ -332,7 +327,6 @@ static int uqbarFlushBuffer(UqbarFile *p){
 
 // Close a file.
 static int uqbarClose(sqlite3_file *pFile){
-  print_to_terminal_wrapped(0, 2);
   int rc;
   UqbarFile *p = (UqbarFile*)pFile;
   rc = uqbarFlushBuffer(p);
@@ -350,7 +344,6 @@ static int uqbarRead(
   int iAmt,
   sqlite_int64 iOfst
 ){
-  print_to_terminal_wrapped(0, 3);
   UqbarFile *p = (UqbarFile*)pFile;
   off_t ofst;                     // Return value from lseek()
   int nRead;                      // Return value from read()
@@ -481,7 +474,6 @@ static int uqbarWrite(
   int iAmt,
   sqlite_int64 iOfst
 ){
-  print_to_terminal_wrapped(0, 4);
   UqbarFile *p = (UqbarFile*)pFile;
 
   if( p->aBuffer ){
@@ -526,19 +518,16 @@ static int uqbarWrite(
 // Truncate a file. This is a no-op for this VFS (see header comments at
 // the top of the file).
 static int uqbarTruncate(sqlite3_file *pFile, sqlite_int64 size){
-  print_to_terminal_wrapped(0, 5);
   return SQLITE_OK;
 }
 
 // Sync the contents of the file to the persistent media: no-op.
 static int uqbarSync(sqlite3_file *pFile, int flags){
-  print_to_terminal_wrapped(0, 6);
   return SQLITE_OK;
 }
 
 // Write the size of the file in bytes to *pSize.
 static int uqbarFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
-  print_to_terminal_wrapped(0, 7);
   UqbarFile *p = (UqbarFile*)pFile;
 
   // Flush the contents of the buffer to disk. As with the flush in the
@@ -635,22 +624,18 @@ static int uqbarFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 // a reserved lock on the database file. This ensures that if a hot-journal
 // file is found in the file-system it is rolled back.
 static int uqbarLock(sqlite3_file *pFile, int eLock){
-  print_to_terminal_wrapped(0, 8);
   return SQLITE_OK;
 }
 static int uqbarUnlock(sqlite3_file *pFile, int eLock){
-  print_to_terminal_wrapped(0, 9);
   return SQLITE_OK;
 }
 static int uqbarCheckReservedLock(sqlite3_file *pFile, int *pResOut){
-  print_to_terminal_wrapped(0, 10);
   *pResOut = 0;
   return SQLITE_OK;
 }
 
 // No xFileControl() verbs are implemented by this VFS.
 static int uqbarFileControl(sqlite3_file *pFile, int op, void *pArg){
-  print_to_terminal_wrapped(0, 11);
   return SQLITE_OK;
 }
 
@@ -658,11 +643,9 @@ static int uqbarFileControl(sqlite3_file *pFile, int op, void *pArg){
 // may return special values allowing SQLite to optimize file-system
 // access to some extent. But it is also safe to simply return 0.
 static int uqbarSectorSize(sqlite3_file *pFile){
-  print_to_terminal_wrapped(0, 12);
   return 0;
 }
 static int uqbarDeviceCharacteristics(sqlite3_file *pFile){
-  print_to_terminal_wrapped(0, 13);
   return 0;
 }
 
@@ -674,7 +657,6 @@ static int uqbarOpen(
   int flags,                      // Input SQLITE_OPEN_XXX flags
   int *pOutFlags                  // Output SQLITE_OPEN_XXX flags (or NULL)
 ){
-  print_to_terminal_wrapped(0, 14);
   static const sqlite3_io_methods uqbario = {
     1,                             // iVersion
     uqbarClose,                    // xClose
@@ -801,12 +783,9 @@ static int uqbarOpen(
     char value[256];
     if( getJsonValue(file_exists_response.ipc->string, "GetHash", value, sizeof(value)) == 0 ){
       // already exists
-      print_to_terminal_wrapped(0, 28);
       return SQLITE_OK;
     }
   }
-
-  print_to_terminal_wrapped(0, 29);
 
   // if file does not exist, create it
   char temp[256];
@@ -863,7 +842,6 @@ static int uqbarOpen(
 // file has been synced to disk before returning.
 // TODO: does this work as noop?
 static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
-  print_to_terminal_wrapped(0, 15);
     return SQLITE_OK;
 }
 
@@ -887,8 +865,6 @@ static int uqbarAccess(
   int flags,
   int *pResOut
 ){
-  print_to_terminal_wrapped(0, 16);
-
   *pResOut = 0;
   return SQLITE_OK;
 }
@@ -908,7 +884,6 @@ static int uqbarFullPathname(
   int nPathOut,                   // Size of output buffer in bytes
   char *zPathOut                  // Pointer to output buffer
 ){
-  print_to_terminal_wrapped(0, 17);
   sqlite3_snprintf(nPathOut, zPathOut, "%s", zPath);
   zPathOut[nPathOut-1] = '\0';
 
@@ -926,34 +901,28 @@ static int uqbarFullPathname(
 // extensions compiled as shared objects. This simple VFS does not support
 // this functionality, so the following functions are no-ops.
 static void *uqbarDlOpen(sqlite3_vfs *pVfs, const char *zPath){
-  print_to_terminal_wrapped(0, 18);
   return 0;
 }
 static void uqbarDlError(sqlite3_vfs *pVfs, int nByte, char *zErrMsg){
-  print_to_terminal_wrapped(0, 19);
   sqlite3_snprintf(nByte, zErrMsg, "Loadable extensions are not supported");
   zErrMsg[nByte-1] = '\0';
 }
 static void (*uqbarDlSym(sqlite3_vfs *pVfs, void *pH, const char *z))(void){
-  print_to_terminal_wrapped(0, 20);
   return 0;
 }
 static void uqbarDlClose(sqlite3_vfs *pVfs, void *pHandle){
-  print_to_terminal_wrapped(0, 21);
   return;
 }
 
 // Parameter zByte points to a buffer nByte bytes in size. Populate this
 // buffer with pseudo-random data.
 static int uqbarRandomness(sqlite3_vfs *pVfs, int nByte, char *zByte){
-  print_to_terminal_wrapped(0, 22);
   return SQLITE_OK;
 }
 
 // Sleep for at least nMicro microseconds. Return the (approximate) number
 // of microseconds slept for.
 static int uqbarSleep(sqlite3_vfs *pVfs, int nMicro){
-  print_to_terminal_wrapped(0, 23);
   sleep(nMicro / 1000000);
   usleep(nMicro % 1000000);
   return nMicro;
@@ -969,7 +938,6 @@ static int uqbarSleep(sqlite3_vfs *pVfs, int nMicro){
 // value, it will stop working some time in the year 2038 AD (the so-called
 // "year 2038" problem that afflicts systems that store time this way).
 static int uqbarCurrentTime(sqlite3_vfs *pVfs, double *pTime){
-  print_to_terminal_wrapped(0, 24);
   time_t t = time(0);
   *pTime = t/86400.0 + 2440587.5;
   return SQLITE_OK;
@@ -980,7 +948,6 @@ static int uqbarCurrentTime(sqlite3_vfs *pVfs, double *pTime){
 //
 //   sqlite3_vfs_register(sqlite3_uqbarvfs(), 0);
 sqlite3_vfs *sqlite3_uqbarvfs(void){
-  print_to_terminal_wrapped(0, 25);
   static sqlite3_vfs uqbarvfs = {
     1,                            // iVersion
     sizeof(UqbarFile),            // szOsFile
