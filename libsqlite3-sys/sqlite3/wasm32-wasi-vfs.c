@@ -842,6 +842,50 @@ static int uqbarOpen(
 // file has been synced to disk before returning.
 // TODO: does this work as noop?
 static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
+    ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
+
+    char temp[256];
+    snprintf(
+      temp,
+      sizeof(temp),
+      "{"
+        "\"drive\": \"%s\","
+        "\"action\": {"
+          "\"Delete\": \"%s\""
+        "}"
+      "}",
+      p->zIdentifier,
+      p->zName
+    );
+    OptionStr request_ipc = {
+      .is_empty = 1,
+      .string = temp,
+    };
+
+    char ipc_string[512];
+    char metadata_string[512];
+    OptionStr ipc = {
+        .is_empty = 0,
+        .string = ipc_string,
+    };
+    OptionStr metadata = {
+        .is_empty = 0,
+        .string = metadata_string,
+    };
+    IpcMetadata response = {
+        .ipc = &ipc,
+        .metadata = &metadata,
+    };
+
+    send_and_await_response_wrapped(
+      p->zOurNode,
+      &target_process,
+      &request_ipc,
+      &empty_option_str,
+      &payload,
+      5,
+      &response
+    );
     return SQLITE_OK;
 }
 
