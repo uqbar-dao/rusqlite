@@ -902,17 +902,27 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
         .is_empty = 0,
         .string = metadata_string,
     };
+    Bytes empty_bytes = {
+        .data = NULL,
+        .len = 0,
+    };
+    Payload request_payload = {
+        .is_empty = 0,
+        .mime = &empty_option_str,
+        .bytes = &empty_bytes,
+    };
     IpcMetadata response = {
         .ipc = &ipc,
         .metadata = &metadata,
     };
+    
 
     send_and_await_response_wrapped(
       zOurNode,
       &target_process,
       &request_ipc,
       &empty_option_str,
-      &payload,
+      &request_payload,
       5,
       &response
     );
