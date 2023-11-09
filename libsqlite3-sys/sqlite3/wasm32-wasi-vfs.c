@@ -855,24 +855,33 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
 
     char *token = strtok(zPathBackup, ":");
     if (token == NULL) {
+      sqlite3_free(zPathBackup);
       return SQLITE_IOERR_READ;
     }
     zOurNode = sqlite3_malloc(strlen(token) + 1);
     strcpy(zOurNode, token);
     token = strtok(NULL, ":");
     if (token == NULL) {
+      sqlite3_free(zPathBackup);
       return SQLITE_IOERR_READ;
     }
     zIdentifier = sqlite3_malloc(strlen(token) + 1);
     strcpy(zIdentifier, token);
     token = strtok(NULL, ":");
     if (token == NULL) {
+      sqlite3_free(zPathBackup);
       return SQLITE_IOERR_READ;
     }
     zName = sqlite3_malloc(strlen(token) + 1);
     strcpy(zName, token);
 
     sqlite3_free(zPathBackup);
+
+    // Initialize empty_option_str before use
+    OptionStr empty_option_str = {
+        .is_empty = 1,
+        .string = ""
+    };
 
     char temp[256];
     snprintf(
@@ -888,7 +897,7 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
       zName
     );
     OptionStr request_ipc = {
-      .is_empty = 1,
+      .is_empty = 0,
       .string = temp,
     };
 
@@ -903,7 +912,7 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
         .string = metadata_string,
     };
     Bytes empty_bytes = {
-        .data = NULL,
+        .data = NULL, // Cast the const void* to void* if this is what's causing the warning
         .len = 0,
     };
     Payload request_payload = {
@@ -915,7 +924,6 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
         .ipc = &ipc,
         .metadata = &metadata,
     };
-    
 
     send_and_await_response_wrapped(
       zOurNode,
