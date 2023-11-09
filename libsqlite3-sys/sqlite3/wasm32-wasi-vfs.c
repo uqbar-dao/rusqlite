@@ -844,6 +844,36 @@ static int uqbarOpen(
 static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
     ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
 
+    char *zOurNode;
+    char *zIdentifier;
+    char *zName;
+
+    // Extract the file information from zPath
+    char *zPathBackup;
+    zPathBackup = sqlite3_malloc(strlen(zPath) + 1);
+    strcpy(zPathBackup, zPath);
+
+    char *token = strtok(zPathBackup, ":");
+    if (token == NULL) {
+      return SQLITE_IOERR_READ;
+    }
+    zOurNode = sqlite3_malloc(strlen(token) + 1);
+    strcpy(zOurNode, token);
+    token = strtok(NULL, ":");
+    if (token == NULL) {
+      return SQLITE_IOERR_READ;
+    }
+    zIdentifier = sqlite3_malloc(strlen(token) + 1);
+    strcpy(zIdentifier, token);
+    token = strtok(NULL, ":");
+    if (token == NULL) {
+      return SQLITE_IOERR_READ;
+    }
+    zName = sqlite3_malloc(strlen(token) + 1);
+    strcpy(zName, token);
+
+    sqlite3_free(zPathBackup);
+
     char temp[256];
     snprintf(
       temp,
@@ -854,8 +884,8 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
           "\"Delete\": \"%s\""
         "}"
       "}",
-      p->zIdentifier,
-      p->zName
+      zIdentifier,
+      zName
     );
     OptionStr request_ipc = {
       .is_empty = 1,
@@ -878,7 +908,7 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
     };
 
     send_and_await_response_wrapped(
-      p->zOurNode,
+      zOurNode,
       &target_process,
       &request_ipc,
       &empty_option_str,
@@ -886,6 +916,12 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
       5,
       &response
     );
+
+    // Free the allocated memory
+    sqlite3_free(zOurNode);
+    sqlite3_free(zIdentifier);
+    sqlite3_free(zName);
+
     return SQLITE_OK;
 }
 
