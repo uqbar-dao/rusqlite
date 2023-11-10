@@ -897,7 +897,7 @@ static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
       zName
     );
     OptionStr request_ipc = {
-      .is_empty = 0,
+      .is_empty = 1,
       .string = temp,
     };
 
