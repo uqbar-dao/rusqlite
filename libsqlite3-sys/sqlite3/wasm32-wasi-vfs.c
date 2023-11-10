@@ -840,7 +840,6 @@ static int uqbarOpen(
 // Delete the file identified by argument zPath. If the dirSync parameter
 // is non-zero, then ensure the file-system modification to delete the
 // file has been synced to disk before returning.
-// TODO: does this work as noop?
 static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
     ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
 
