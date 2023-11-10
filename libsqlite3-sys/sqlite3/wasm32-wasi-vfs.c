@@ -840,8 +840,105 @@ static int uqbarOpen(
 // Delete the file identified by argument zPath. If the dirSync parameter
 // is non-zero, then ensure the file-system modification to delete the
 // file has been synced to disk before returning.
-// TODO: does this work as noop?
 static int uqbarDelete(sqlite3_vfs *pVfs, const char *zPath, int dirSync){
+    ProcessId target_process = {.process_name = "vfs", .package_name = "sys", .publisher_node = "uqbar"};
+
+    char *zOurNode;
+    char *zIdentifier;
+    char *zName;
+
+    // Extract the file information from zPath
+    char *zPathBackup;
+    zPathBackup = sqlite3_malloc(strlen(zPath) + 1);
+    strcpy(zPathBackup, zPath);
+
+    char *token = strtok(zPathBackup, ":");
+    if (token == NULL) {
+      sqlite3_free(zPathBackup);
+      return SQLITE_IOERR_READ;
+    }
+    zOurNode = sqlite3_malloc(strlen(token) + 1);
+    strcpy(zOurNode, token);
+    token = strtok(NULL, ":");
+    if (token == NULL) {
+      sqlite3_free(zPathBackup);
+      return SQLITE_IOERR_READ;
+    }
+    zIdentifier = sqlite3_malloc(strlen(token) + 1);
+    strcpy(zIdentifier, token);
+    token = strtok(NULL, ":");
+    if (token == NULL) {
+      sqlite3_free(zPathBackup);
+      return SQLITE_IOERR_READ;
+    }
+    zName = sqlite3_malloc(strlen(token) + 1);
+    strcpy(zName, token);
+
+    sqlite3_free(zPathBackup);
+
+    // Initialize empty_option_str before use
+    OptionStr empty_option_str = {
+        .is_empty = 1,
+        .string = ""
+    };
+
+    char temp[256];
+    snprintf(
+      temp,
+      sizeof(temp),
+      "{"
+        "\"drive\": \"%s\","
+        "\"action\": {"
+          "\"Delete\": \"%s\""
+        "}"
+      "}",
+      zIdentifier,
+      zName
+    );
+    OptionStr request_ipc = {
+      .is_empty = 1,
+      .string = temp,
+    };
+
+    char ipc_string[512];
+    char metadata_string[512];
+    OptionStr ipc = {
+        .is_empty = 0,
+        .string = ipc_string,
+    };
+    OptionStr metadata = {
+        .is_empty = 0,
+        .string = metadata_string,
+    };
+    Bytes empty_bytes = {
+        .data = NULL, // Cast the const void* to void* if this is what's causing the warning
+        .len = 0,
+    };
+    Payload request_payload = {
+        .is_empty = 0,
+        .mime = &empty_option_str,
+        .bytes = &empty_bytes,
+    };
+    IpcMetadata response = {
+        .ipc = &ipc,
+        .metadata = &metadata,
+    };
+
+    send_and_await_response_wrapped(
+      zOurNode,
+      &target_process,
+      &request_ipc,
+      &empty_option_str,
+      &request_payload,
+      5,
+      &response
+    );
+
+    // Free the allocated memory
+    sqlite3_free(zOurNode);
+    sqlite3_free(zIdentifier);
+    sqlite3_free(zName);
+
     return SQLITE_OK;
 }
 
